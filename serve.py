@@ -122,17 +122,24 @@ def get_sessions_with_activity():
         sessions = []
         now = time.time() * 1000
         
-        # Build parent-child map from key structure
+        # Build parent-child map from key structure and spawnedBy field
         # Cron runs: "agent:main:cron:<id>:run:<runId>" → parent "agent:main:cron:<id>"
+        # Sub-agents: spawnedBy field → parent session key
         children_map = {}  # parent_key → [child_keys]
         parent_map = {}    # child_key → parent_key
         
-        for key in raw:
+        for key, val in raw.items():
+            # Cron run relationship
             if ':run:' in key:
                 parent_key = key.rsplit(':run:', 1)[0]
                 if parent_key in raw:
                     parent_map[key] = parent_key
                     children_map.setdefault(parent_key, []).append(key)
+            # Sub-agent relationship
+            spawned_by = val.get('spawnedBy', '')
+            if spawned_by and spawned_by in raw:
+                parent_map[key] = spawned_by
+                children_map.setdefault(spawned_by, []).append(key)
         
         for key, s in raw.items():
             session = {'key': key, **s}
@@ -162,6 +169,8 @@ def get_sessions_with_activity():
             # Classify session type
             if key == 'agent:main:main':
                 session['sessionType'] = 'main'
+            elif ':subagent:' in key:
+                session['sessionType'] = 'subagent'
             elif ':cron:' in key and ':run:' in key:
                 session['sessionType'] = 'cron-run'
             elif ':cron:' in key:

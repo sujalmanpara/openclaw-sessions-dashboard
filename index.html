@@ -29,6 +29,7 @@
   .card-name { font-size: 13px; font-weight: 600; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .badge { font-size: 8px; padding: 2px 6px; border-radius: 3px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
   .bg { background: #1a2744; color: #5b9cf5; }
+  .bs { background: #2a1444; color: #c55bf5; }
   .bc { background: #2a2a14; color: #f5c55b; }
   .bd { background: #1a4424; color: #5bf59c; }
   .meta { display: flex; flex-wrap: wrap; gap: 8px; font-size: 10px; color: #444; margin-bottom: 6px; }
@@ -114,6 +115,7 @@
   <div class="stat"><div class="stat-value" id="sG">-</div><div class="stat-label">Groups</div></div>
   <div class="stat"><div class="stat-value" id="sC">-</div><div class="stat-label">Crons</div></div>
   <div class="stat"><div class="stat-value" id="sCR">-</div><div class="stat-label">Runs</div></div>
+  <div class="stat"><div class="stat-value" id="sSA">-</div><div class="stat-label">Sub-agents</div></div>
   <div class="stat"><div class="stat-value" id="sD">-</div><div class="stat-label">Direct</div></div>
   <div style="margin-left:auto;display:flex;align-items:center;gap:6px" id="authKeys"></div>
 </div>
@@ -124,6 +126,7 @@
   <button class="fbtn" onclick="filt('group',this)">💬 Groups</button>
   <button class="fbtn" onclick="filt('cron',this)">⏰ Crons</button>
   <button class="fbtn" onclick="filt('cron-run',this)">🔁 Runs</button>
+  <button class="fbtn" onclick="filt('subagent',this)">🤖 Sub-agents</button>
   <button class="fbtn" onclick="filt('direct',this)">👤 Direct</button>
   <button class="fbtn" onclick="filt('busy',this)">⚡ Busy</button>
 </div>
@@ -159,6 +162,7 @@ function ago(ts) {
 
 function typ(k, s) {
   if (s && s.sessionType) return s.sessionType;
+  if (k.includes(':subagent:')) return 'subagent';
   if (k.includes(':cron:') && k.includes(':run:')) return 'cron-run';
   if (k.includes(':cron:')) return 'cron';
   if (k.includes(':topic:') || k.includes('group:')) return 'group';
@@ -187,8 +191,8 @@ function name(k, s) {
 }
 
 function badge(t) {
-  const cls = t==='group'?'bg':t==='cron'?'bc':t==='cron-run'?'bc':t==='main'?'bd':'bd';
-  const label = t==='cron-run'?'run':t;
+  const cls = t==='group'?'bg':t==='cron'?'bc':t==='cron-run'?'bc':t==='subagent'?'bs':t==='main'?'bd':'bd';
+  const label = t==='cron-run'?'run':t==='subagent'?'sub-agent':t;
   return `<span class="badge ${cls}">${label}</span>`;
 }
 
@@ -222,6 +226,7 @@ function draw() {
   else if (F==='group') list=ALL.filter(s=>typ(s.key,s)==='group');
   else if (F==='cron') list=ALL.filter(s=>typ(s.key,s)==='cron');
   else if (F==='cron-run') list=ALL.filter(s=>typ(s.key,s)==='cron-run');
+  else if (F==='subagent') list=ALL.filter(s=>typ(s.key,s)==='subagent');
   else if (F==='direct') list=ALL.filter(s=>['direct','main'].includes(typ(s.key,s)));
   else if (F==='busy') list=ALL.filter(s=>s.activity&&s.activity.length);
 
@@ -239,23 +244,30 @@ function draw() {
       parentHTML = `<div class="parent-link" onclick="event.stopPropagation();openSessionByKey('${esc(s.parentKey)}')">↑ ${esc(s.parentLabel)}</div>`;
     }
     
-    // Children summary for parent crons
+    // Children summary (cron runs + sub-agents)
     let childrenHTML = '';
     if (s.childCount > 0) {
       const recentChildren = (s.children || []).slice(0, 3);
+      const hasSubagents = recentChildren.some(c => c.key && c.key.includes(':subagent:'));
+      const hasCronRuns = recentChildren.some(c => c.key && c.key.includes(':run:'));
+      const childLabel = hasSubagents && hasCronRuns ? 'children' : hasSubagents ? 'sub-agent' + (s.childCount>1?'s':'') : 'run' + (s.childCount>1?'s':'');
+      const childIcon = hasSubagents ? '🤖' : '🔁';
       childrenHTML = `<div class="children-section">
-        <div class="children-label">🔁 ${s.childCount} run${s.childCount>1?'s':''}</div>
-        ${recentChildren.map(c => `<div class="child-item" onclick="event.stopPropagation();openSessionByKey('${esc(c.key)}')">
-          <span class="child-name"><span class="dot ${dot(c.updatedAt)}"></span>${ago(c.updatedAt)} ago</span>
-          <span class="child-time">${c.sessionId ? c.sessionId.slice(0,8) : '—'}</span>
-        </div>`).join('')}
+        <div class="children-label">${childIcon} ${s.childCount} ${childLabel}</div>
+        ${recentChildren.map(c => {
+          const isSubagent = c.key && c.key.includes(':subagent:');
+          return `<div class="child-item" onclick="event.stopPropagation();openSessionByKey('${esc(c.key)}')">
+          <span class="child-name"><span class="dot ${dot(c.updatedAt)}"></span>${isSubagent ? '🤖 ' : ''}${c.label || (c.sessionId ? c.sessionId.slice(0,8) : '—')}</span>
+          <span class="child-time">${ago(c.updatedAt)} ago</span>
+        </div>`;
+        }).join('')}
         ${s.childCount > 3 ? `<div style="font-size:9px;color:#444;padding:2px 6px">+${s.childCount-3} more</div>` : ''}
       </div>`;
     }
     
     return `<div class="card${isActive?' is-active':''}" onclick="openSession('${esc(s.key)}',ALL[${idx}])" style="cursor:pointer">
       <div class="card-top">
-        <div class="card-name"><span class="dot ${dot(s.updatedAt)}"></span>${name(s.key,s)}${s.childCount?'<span class="child-count">'+s.childCount+' runs</span>':''}</div>
+        <div class="card-name"><span class="dot ${dot(s.updatedAt)}"></span>${name(s.key,s)}${s.childCount?'<span class="child-count">'+s.childCount+' '+(s.children?.some(c=>c.key?.includes(':subagent:'))?'sub-agents':'runs')+'</span>':''}</div>
         ${badge(t)}
       </div>
       <div class="meta">
@@ -281,6 +293,7 @@ async function load() {
     const gr=ALL.filter(s=>typ(s.key,s)==='group').length;
     const cr=ALL.filter(s=>typ(s.key,s)==='cron').length;
     const crr=ALL.filter(s=>typ(s.key,s)==='cron-run').length;
+    const sa=ALL.filter(s=>typ(s.key,s)==='subagent').length;
     const di=ALL.filter(s=>['direct','main'].includes(typ(s.key,s))).length;
     
     document.getElementById('sT').textContent=ALL.length;
@@ -289,6 +302,7 @@ async function load() {
     document.getElementById('sG').textContent=gr;
     document.getElementById('sC').textContent=cr;
     document.getElementById('sCR').textContent=crr;
+    document.getElementById('sSA').textContent=sa;
     document.getElementById('sD').textContent=di;
     document.getElementById('lastUp').textContent=new Date().toLocaleTimeString();
     
