@@ -9,15 +9,24 @@ PORT = 3847
 WS_PORT = 3848
 DIR = os.path.dirname(os.path.abspath(__file__))
 SESSIONS_FILE = '/root/.openclaw/agents/main/sessions/sessions.json'
+TOPIC_NAMES_FILE = os.path.join(DIR, 'topic-names.json')
+
+def load_topic_names():
+    try:
+        with open(TOPIC_NAMES_FILE) as f:
+            return json.load(f)
+    except:
+        return {}
 TRANSCRIPTS_DIR = '/root/.openclaw/agents/main/sessions/'
 PINNED_FILE = os.path.join(DIR, 'pinned.json')
 
 # WebSocket clients for real-time updates
 ws_clients = set()
 
-class ReuseServer(socketserver.TCPServer):
+class ReuseServer(socketserver.ThreadingTCPServer):
     allow_reuse_address = True
     allow_reuse_port = True
+    daemon_threads = True
 
 def load_pinned():
     try:
@@ -268,13 +277,15 @@ def get_sessions_with_activity():
         
         auth = get_auth_info()
         stats = calculate_session_stats(sessions)
+        topic_names = load_topic_names()
         
         return json.dumps({
             'count': len(sessions), 
             'sessions': sessions, 
             'auth': auth,
             'stats': stats,
-            'timestamp': now
+            'timestamp': now,
+            'topicNames': topic_names
         })
     except Exception as e:
         return json.dumps({'error': str(e), 'count': 0, 'sessions': []})

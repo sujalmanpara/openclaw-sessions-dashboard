@@ -348,7 +348,7 @@ body{
   background:var(--bg-surface);
   border-left:1px solid var(--border-subtle);
   display:flex;flex-direction:column;
-  z-index:40;
+  z-index:60;
   box-shadow:-8px 0 24px rgba(0,0,0,.4);
 }
 
@@ -785,6 +785,7 @@ async function refreshData() {
     const data = await response.json();
     if (data.error) { showToast('error', 'Error', data.error); return; }
     allSessions = data.sessions || [];
+    if (data.topicNames) topicNamesMap = data.topicNames;
     updateStats(data.stats || {});
     updateApiKeys(data.auth || {});
     applyFiltersAndSort();
@@ -1027,6 +1028,34 @@ async function openSession(sessionKey, event) {
     ${session.status === 'running' ? '<span style="color:rgba(34,197,94,.7)">live</span>' : ''}
   `;
   await loadTranscript(session.sessionId);
+  // Start live polling for transcript
+  if (window._transcriptInterval) clearInterval(window._transcriptInterval);
+  window._transcriptInterval = setInterval(() => {
+    if (selectedSession && selectedSession.sessionId) {
+      refreshTranscript(selectedSession.sessionId);
+    }
+  }, 3000);
+}
+
+function closePanel() {
+  document.getElementById('detailPanel').style.display = 'none';
+  selectedSession = null;
+  if (window._transcriptInterval) { clearInterval(window._transcriptInterval); window._transcriptInterval = null; }
+}
+
+async function refreshTranscript(sessionId) {
+  try {
+    const response = await fetch(`/data/transcript/${sessionId}?t=` + Date.now());
+    const data = await response.json();
+    if (data.error || !data.entries) return;
+    const container = document.getElementById('logContainer');
+    const wasAtBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 100;
+    const currentCount = container.querySelectorAll('.log-entry').length;
+    if (data.entries.length !== currentCount) {
+      renderTranscript(data.entries);
+      if (wasAtBottom) container.scrollTop = container.scrollHeight;
+    }
+  } catch(e) {}
 }
 
 function updateBreadcrumb(session) {
@@ -1142,6 +1171,7 @@ function closeDetailPanel() {
   document.getElementById('detailPanel').style.display = 'none';
   selectedSession = null;
   document.getElementById('breadcrumb').innerHTML = '';
+  if (window._transcriptInterval) { clearInterval(window._transcriptInterval); window._transcriptInterval = null; }
 }
 
 function toggleChildren(index) {
@@ -1248,14 +1278,19 @@ function showKeyboardHelp() {
   showToast('info', 'Shortcuts', 'j/k: Navigate · Enter: Open · /: Search · r: Refresh · Esc: Close');
 }
 
+let topicNamesMap = {};
+
 function getSessionName(session) {
   if (session.label) return session.label;
-  if (session.subject) {
-    const topicMatch = session.key.match(/topic:(\d+)/);
-    const topic = topicMatch?.[1];
-    return session.subject + (topic && topic !== '1' ? ` #${topic}` : '');
+  const topicMatch = session.key.match(/topic:(\d+)/);
+  if (topicMatch) {
+    const topicId = topicMatch[1];
+    const topicName = topicNamesMap[topicId];
+    if (topicName) return topicName;
+    return session.subject ? `${session.subject} #${topicId}` : `Topic ${topicId}`;
   }
-  if (session.displayName) return session.displayName.replace('telegram:', '');
+  if (session.subject) return session.subject;
+  if (session.displayName) return session.displayName.replace('telegram:', '').replace('g-', 'Group ');
   if (session.key.includes(':main:main')) return 'Main DM';
   const cronMatch = session.key.match(/cron:(.{8})/);
   if (cronMatch) return `Cron ${cronMatch[1]}`;
