@@ -155,7 +155,7 @@ body {
 .cost-value {
   font-size: 18px;
   font-weight: 700;
-  color: var(--accent);
+  color: var(--text-primary);
   margin-bottom: 2px;
 }
 
@@ -294,10 +294,14 @@ body {
   transition: all 0.2s;
 }
 
-.filter-btn:hover,
+.filter-btn:hover {
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  border-color: var(--border-hover);
+}
 .filter-btn.active {
-  background: var(--accent);
-  color: white;
+  background: rgba(124, 111, 247, 0.15);
+  color: var(--text-primary);
   border-color: var(--accent);
 }
 
@@ -425,12 +429,12 @@ body {
   letter-spacing: 0.5px;
 }
 
-.badge-main { background: #1a4424; color: var(--green); }
-.badge-group { background: #1a2744; color: var(--blue); }
-.badge-cron { background: #2a2a14; color: var(--yellow); }
-.badge-run { background: #2a2a14; color: var(--yellow); }
-.badge-subagent { background: #2a1444; color: var(--purple); }
-.badge-telegram { background: #1a2744; color: var(--blue); }
+.badge-main { background: rgba(74, 222, 128, 0.1); color: rgba(74, 222, 128, 0.7); }
+.badge-group { background: rgba(91, 156, 245, 0.1); color: rgba(91, 156, 245, 0.7); }
+.badge-cron { background: rgba(245, 158, 11, 0.1); color: rgba(245, 158, 11, 0.7); }
+.badge-run { background: rgba(245, 158, 11, 0.08); color: rgba(245, 158, 11, 0.6); }
+.badge-subagent { background: rgba(197, 91, 245, 0.1); color: rgba(197, 91, 245, 0.7); }
+.badge-telegram { background: rgba(91, 156, 245, 0.1); color: rgba(91, 156, 245, 0.7); }
 
 .model-pill {
   font-size: 9px;
@@ -487,8 +491,8 @@ body {
 
 .cost-display {
   font-size: 10px;
-  color: var(--yellow);
-  font-weight: 600;
+  color: var(--text-muted);
+  font-weight: 500;
 }
 
 .activity-section {
@@ -506,7 +510,7 @@ body {
 }
 
 .activity-action {
-  color: var(--accent);
+  color: var(--text-muted);
   font-weight: 500;
   white-space: nowrap;
 }
@@ -694,9 +698,9 @@ body {
   border-left: 3px solid var(--border-primary);
 }
 
-.log-entry.role-user { border-color: var(--blue); }
-.log-entry.role-assistant { border-color: var(--accent); }
-.log-entry.role-tool { border-color: var(--yellow); }
+.log-entry.role-user { border-color: rgba(91, 156, 245, 0.4); }
+.log-entry.role-assistant { border-color: rgba(124, 111, 247, 0.4); }
+.log-entry.role-tool { border-color: rgba(245, 158, 11, 0.3); }
 
 .log-header {
   display: flex;
@@ -715,9 +719,9 @@ body {
   border-radius: 4px;
 }
 
-.role-user { background: var(--blue); color: white; }
-.role-assistant { background: var(--accent); color: white; }
-.role-tool { background: var(--yellow); color: black; }
+.role-user { background: rgba(91, 156, 245, 0.15); color: var(--blue); }
+.role-assistant { background: rgba(124, 111, 247, 0.15); color: var(--accent); }
+.role-tool { background: rgba(245, 158, 11, 0.15); color: var(--yellow); }
 
 .log-timestamp {
   font-size: 9px;
@@ -802,7 +806,7 @@ body {
 
 .tool-name {
   font-size: 12px;
-  color: var(--yellow);
+  color: var(--text-secondary);
   font-weight: 600;
   display: flex;
   align-items: center;
@@ -904,8 +908,11 @@ body {
 }
 
 .log-cost {
-  color: var(--yellow);
-  font-weight: 600;
+  color: var(--text-muted);
+  font-weight: 500;
+  background: rgba(245, 158, 11, 0.1);
+  padding: 1px 5px;
+  border-radius: 3px;
 }
 
 .log-tokens {
