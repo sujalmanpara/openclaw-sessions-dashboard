@@ -2062,15 +2062,66 @@ function renderOAuthSection() {
         html += `<div class="oauth-usage-item">
           <div class="oauth-usage-label"><span>Sonnet (7d)</span><span>${pct.toFixed(1)}%</span></div>
           <div class="oauth-usage-bar"><div class="oauth-usage-fill" style="width:${Math.min(pct,100)}%;background:${getUsageColor(pct)}"></div></div>
+          ${u.seven_day_sonnet.resets_at ? `<div class="oauth-reset-time">Resets in ${formatResetTime(u.seven_day_sonnet.resets_at)}</div>` : ''}
+        </div>`;
+      }
+
+      // Opus usage
+      if (u.seven_day_opus && u.seven_day_opus.utilization !== undefined) {
+        const pct = u.seven_day_opus.utilization || 0;
+        html += `<div class="oauth-usage-item">
+          <div class="oauth-usage-label"><span>Opus (7d)</span><span>${pct.toFixed(1)}%</span></div>
+          <div class="oauth-usage-bar"><div class="oauth-usage-fill" style="width:${Math.min(pct,100)}%;background:${getUsageColor(pct)}"></div></div>
+          ${u.seven_day_opus.resets_at ? `<div class="oauth-reset-time">Resets in ${formatResetTime(u.seven_day_opus.resets_at)}</div>` : ''}
+        </div>`;
+      }
+
+      // OAuth Apps usage
+      if (u.seven_day_oauth_apps && u.seven_day_oauth_apps.utilization !== undefined) {
+        const pct = u.seven_day_oauth_apps.utilization || 0;
+        html += `<div class="oauth-usage-item">
+          <div class="oauth-usage-label"><span>OAuth Apps (7d)</span><span>${pct.toFixed(1)}%</span></div>
+          <div class="oauth-usage-bar"><div class="oauth-usage-fill" style="width:${Math.min(pct,100)}%;background:${getUsageColor(pct)}"></div></div>
+          ${u.seven_day_oauth_apps.resets_at ? `<div class="oauth-reset-time">Resets in ${formatResetTime(u.seven_day_oauth_apps.resets_at)}</div>` : ''}
+        </div>`;
+      }
+
+      // Cowork usage
+      if (u.seven_day_cowork && u.seven_day_cowork.utilization !== undefined) {
+        const pct = u.seven_day_cowork.utilization || 0;
+        html += `<div class="oauth-usage-item">
+          <div class="oauth-usage-label"><span>Cowork (7d)</span><span>${pct.toFixed(1)}%</span></div>
+          <div class="oauth-usage-bar"><div class="oauth-usage-fill" style="width:${Math.min(pct,100)}%;background:${getUsageColor(pct)}"></div></div>
+          ${u.seven_day_cowork.resets_at ? `<div class="oauth-reset-time">Resets in ${formatResetTime(u.seven_day_cowork.resets_at)}</div>` : ''}
+        </div>`;
+      }
+
+      // iguana_necktie (unknown/new metric)
+      if (u.iguana_necktie && u.iguana_necktie.utilization !== undefined) {
+        const pct = u.iguana_necktie.utilization || 0;
+        html += `<div class="oauth-usage-item">
+          <div class="oauth-usage-label"><span>🦎 Iguana (7d)</span><span>${pct.toFixed(1)}%</span></div>
+          <div class="oauth-usage-bar"><div class="oauth-usage-fill" style="width:${Math.min(pct,100)}%;background:${getUsageColor(pct)}"></div></div>
+          ${u.iguana_necktie.resets_at ? `<div class="oauth-reset-time">Resets in ${formatResetTime(u.iguana_necktie.resets_at)}</div>` : ''}
         </div>`;
       }
 
       html += '</div>';
 
       // Extra usage
-      if (u.extra_usage && u.extra_usage.is_enabled) {
-        html += `<div class="oauth-extra">💳 Extra usage: $${(u.extra_usage.used_credits||0).toFixed(2)} / $${u.extra_usage.monthly_limit||0}</div>`;
+      if (u.extra_usage) {
+        if (u.extra_usage.is_enabled) {
+          const used = u.extra_usage.used_credits || 0;
+          const limit = u.extra_usage.monthly_limit || 0;
+          const pct = limit > 0 ? Math.min(100, (used / limit) * 100) : 0;
+          html += `<div class="oauth-extra">💳 Extra usage: $${used.toFixed(2)} / $${limit} (${pct.toFixed(1)}% of monthly limit)</div>`;
+        } else {
+          html += `<div class="oauth-extra" style="opacity:0.5">💳 Extra usage: disabled</div>`;
+        }
       }
+
+      // Raw data toggle
+      html += `<details style="margin-top:6px"><summary style="font-size:10px;color:var(--text-dim);cursor:pointer;user-select:none">Raw API response</summary><pre style="font-size:9px;color:var(--text-muted);background:var(--bg-base);padding:6px;border-radius:4px;margin-top:4px;overflow-x:auto;max-height:200px">${escapeHtml(JSON.stringify(u, null, 2))}</pre></details>`;
     }
     html += '</div>';
   });
