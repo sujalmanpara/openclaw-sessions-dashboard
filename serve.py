@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-import http.server, json, os, socketserver, glob, time, threading, asyncio, websockets, urllib.request, urllib.error
+import http.server, json, os, socketserver, glob, time, threading, asyncio, websockets, urllib.request, urllib.error, gzip, hashlib
 from datetime import datetime, timedelta
+from urllib.parse import urlparse, parse_qs
 import subprocess
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
@@ -10,6 +11,10 @@ WS_PORT = 3848
 DIR = os.path.dirname(os.path.abspath(__file__))
 SESSIONS_FILE = '/root/.openclaw/agents/main/sessions/sessions.json'
 TOPIC_NAMES_FILE = os.path.join(DIR, 'topic-names.json')
+
+# ── In-memory cache ──
+_sessions_cache = {'data': None, 'etag': None, 'mtime': 0}
+_sessions_cache_lock = threading.Lock()
 
 def get_system_info():
     info = {}
@@ -402,11 +407,17 @@ def get_sessions_with_activity():
             else:
                 session['status'] = 'completed'
             
-            # Get activity for recent sessions
-            if now - updated < 7200000 and sid:
+            # Get activity only for ACTIVE sessions (5 min window, not 2 hours)
+            if now - updated < 300000 and sid:
                 activity = get_recent_activity(sid)
                 if activity:
                     session['activity'] = activity
+            
+            # Strip heavy fields not needed by frontend
+            session.pop('skillsSnapshot', None)
+            session.pop('systemPromptReport', None)
+            session.pop('origin', None)
+            session.pop('deliveryContext', None)
             
             sessions.append(session)
         
@@ -734,16 +745,16 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return
 
         if self.path.startswith('/data/system.json'):
-            data = get_system_info()
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json')
-            self.send_header('Access-Control-Allow-Origin', '*')
-            self.end_headers()
-            self.wfile.write(json.dumps(data).encode())
+            data = json.dumps(get_system_info())
+            self._send_json_gzipped(data)
             return
         
         if self.path.startswith('/data/transcript/'):
-            sid = self.path.split('/data/transcript/')[1].split('?')[0]
+            parsed_url = urlparse(self.path)
+            sid = parsed_url.path.split('/data/transcript/')[1]
+            tparams = parse_qs(parsed_url.query)
+            t_limit = int(tparams.get('limit', [100])[0])
+            t_offset = int(tparams.get('offset', [-1])[0])  # -1 means "last N"
             import glob
             patterns = [
                 os.path.join(TRANSCRIPTS_DIR, f'{sid}.jsonl'),
@@ -840,24 +851,96 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 self.wfile.write(json.dumps({'error': str(e)}).encode())
                 return
             
-            data = json.dumps({'file': os.path.basename(f), 'count': len(entries), 'entries': entries})
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json')
-            self.send_header('Access-Control-Allow-Origin', '*')
-            self.end_headers()
-            self.wfile.write(data.encode())
+            total = len(entries)
+            # Pagination: default returns last 100 entries
+            if t_offset == -1:
+                # Last N entries
+                paginated = entries[-t_limit:] if len(entries) > t_limit else entries
+                actual_offset = max(0, total - t_limit)
+            else:
+                paginated = entries[t_offset:t_offset + t_limit]
+                actual_offset = t_offset
+            
+            data = json.dumps({
+                'file': os.path.basename(f),
+                'count': len(paginated),
+                'total': total,
+                'offset': actual_offset,
+                'hasMore': actual_offset > 0 if t_offset == -1 else (t_offset + t_limit) < total,
+                'entries': paginated
+            })
+            self._send_json_gzipped(data)
             return
         
         if self.path.startswith('/data/sessions.json'):
-            data = get_sessions_with_activity()
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json')
-            self.send_header('Access-Control-Allow-Origin', '*')
-            self.end_headers()
-            self.wfile.write(data.encode())
+            parsed = urlparse(self.path)
+            params = parse_qs(parsed.query)
+            since = int(params.get('since', [0])[0])
+            
+            # Check cache
+            with _sessions_cache_lock:
+                try:
+                    current_mtime = os.path.getmtime(SESSIONS_FILE)
+                except:
+                    current_mtime = 0
+                
+                if _sessions_cache['data'] is None or current_mtime != _sessions_cache['mtime']:
+                    raw_data = get_sessions_with_activity()
+                    _sessions_cache['data'] = raw_data
+                    _sessions_cache['mtime'] = current_mtime
+                    _sessions_cache['etag'] = hashlib.md5(raw_data.encode()).hexdigest()[:16]
+                    _sessions_cache['parsed'] = json.loads(raw_data)
+                
+                etag = _sessions_cache['etag']
+                cached_parsed = _sessions_cache['parsed']
+            
+            # ETag support
+            client_etag = self.headers.get('If-None-Match', '').strip('"')
+            if client_etag == etag and not since:
+                self.send_response(304)
+                self.end_headers()
+                return
+            
+            # If since param, filter to only changed sessions
+            if since:
+                filtered = [s for s in cached_parsed.get('sessions', []) if s.get('updatedAt', 0) > since]
+                response_data = json.dumps({
+                    'count': len(filtered),
+                    'sessions': filtered,
+                    'stats': cached_parsed.get('stats', {}),
+                    'timestamp': cached_parsed.get('timestamp', 0),
+                    'topicNames': cached_parsed.get('topicNames', {}),
+                    'incremental': True
+                })
+            else:
+                response_data = _sessions_cache['data']
+            
+            self._send_json_gzipped(response_data, etag)
             return
         super().do_GET()
     
+    def _send_json_gzipped(self, data, etag=None):
+        """Send JSON response with gzip if client supports it and data > 1KB."""
+        raw = data.encode('utf-8') if isinstance(data, str) else data
+        accept_enc = self.headers.get('Accept-Encoding', '')
+        use_gzip = 'gzip' in accept_enc and len(raw) > 1024
+        
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Access-Control-Allow-Origin', '*')
+        if etag:
+            self.send_header('ETag', f'"{etag}"')
+        if use_gzip:
+            compressed = gzip.compress(raw, compresslevel=6)
+            self.send_header('Content-Encoding', 'gzip')
+            self.send_header('Content-Length', str(len(compressed)))
+            self.end_headers()
+            self.wfile.write(compressed)
+        else:
+            self.send_header('Content-Length', str(len(raw)))
+            self.end_headers()
+            self.wfile.write(raw)
+
     def log_message(self, *a): pass
 
 # WebSocket server for real-time updates
@@ -884,6 +967,9 @@ class SessionsWatcher(FileSystemEventHandler):
         if event.is_directory:
             return
         if event.src_path.endswith('sessions.json') or event.src_path.endswith('.jsonl'):
+            # Invalidate cache
+            with _sessions_cache_lock:
+                _sessions_cache['data'] = None
             # Debounce - only update every 2 seconds
             now = time.time()
             if now - self.last_update > 2:

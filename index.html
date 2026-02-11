@@ -798,11 +798,22 @@ let searchTerm = '';
 let selectedSession = null;
 let webSocket = null;
 let keyboardFocusIndex = -1;
+let lastDataTimestamp = 0;  // For incremental updates
+let sessionsEtag = null;    // For ETag caching
+let transcriptTotal = 0;    // Total transcript entries
+let transcriptOffset = 0;   // Current offset loaded
+let transcriptEntries = []; // All loaded entries
 let settings = {
   sound: false,
   toast: true,
   autoRefresh: true
 };
+
+// ── Virtual Scroll State ──
+const CARD_HEIGHT = 80; // approximate card height in px
+const CARD_GAP = 8;
+const BUFFER_CARDS = 5;
+let virtualScrollEnabled = false;
 
 document.addEventListener('DOMContentLoaded', () => {
   loadSettings();
@@ -878,15 +889,59 @@ async function restartGateway() {
   } catch(e) { showToast('error', 'Error', e.message); }
 }
 
-async function refreshData() {
+async function refreshData(forceFullLoad) {
   try {
-    const response = await fetch('/data/sessions.json?t=' + Date.now());
+    // Use incremental loading after first full load
+    let url = '/data/sessions.json';
+    if (lastDataTimestamp && !forceFullLoad) {
+      url += '?since=' + lastDataTimestamp;
+    }
+    
+    const headers = {};
+    if (sessionsEtag && !forceFullLoad) {
+      headers['If-None-Match'] = '"' + sessionsEtag + '"';
+    }
+    
+    const response = await fetch(url, { headers });
+    
+    // 304 Not Modified — nothing changed
+    if (response.status === 304) {
+      document.getElementById('lastUpdate').textContent = 'Updated ' + new Date().toLocaleTimeString() + ' (no changes)';
+      return;
+    }
+    
     const data = await response.json();
     if (data.error) { showToast('error', 'Error', data.error); return; }
-    allSessions = data.sessions || [];
+    
+    // Get ETag from response
+    const etag = response.headers.get('ETag');
+    if (etag) sessionsEtag = etag.replace(/"/g, '');
+    
+    if (data.incremental) {
+      // Merge incremental updates
+      const updatedSessions = data.sessions || [];
+      const updatedKeys = new Set(updatedSessions.map(s => s.key));
+      allSessions = allSessions.map(s => {
+        if (updatedKeys.has(s.key)) {
+          const updated = updatedSessions.find(u => u.key === s.key);
+          return updated || s;
+        }
+        return s;
+      });
+      // Add any new sessions not in allSessions
+      for (const s of updatedSessions) {
+        if (!allSessions.find(a => a.key === s.key)) {
+          allSessions.push(s);
+        }
+      }
+    } else {
+      allSessions = data.sessions || [];
+      if (data.auth) updateApiKeys(data.auth);
+    }
+    
     if (data.topicNames) topicNamesMap = data.topicNames;
+    if (data.timestamp) lastDataTimestamp = data.timestamp;
     updateStats(data.stats || {});
-    updateApiKeys(data.auth || {});
     applyFiltersAndSort();
     document.getElementById('lastUpdate').textContent = 'Updated ' + new Date().toLocaleTimeString();
     document.getElementById('sessionCount').textContent = allSessions.length + ' sessions';
@@ -1003,7 +1058,79 @@ function renderSessions() {
     container.innerHTML = '<div class="empty-state"><p>No sessions match your criteria</p><button class="btn" onclick="setFilter(\'all\', document.querySelector(\'.filter-btn\'));document.querySelector(\'.filter-btn\').classList.add(\'active\')">Show all sessions</button></div>';
     return;
   }
-  container.innerHTML = filteredSessions.map((session, index) => createSessionCard(session, index)).join('');
+  
+  // Virtual scrolling for large lists
+  if (filteredSessions.length > 50 && currentViewMode === 'list') {
+    setupVirtualScroll(container);
+  } else {
+    // For grid view or small lists, render all (with documentFragment for perf)
+    teardownVirtualScroll();
+    const fragment = document.createDocumentFragment();
+    const tmp = document.createElement('div');
+    tmp.innerHTML = filteredSessions.map((session, index) => createSessionCard(session, index)).join('');
+    while (tmp.firstChild) fragment.appendChild(tmp.firstChild);
+    container.innerHTML = '';
+    container.appendChild(fragment);
+  }
+}
+
+function setupVirtualScroll(container) {
+  virtualScrollEnabled = true;
+  const totalHeight = filteredSessions.length * (CARD_HEIGHT + CARD_GAP);
+  const scrollParent = container.closest('.sessions-panel');
+  
+  container.innerHTML = '';
+  container.style.position = 'relative';
+  container.style.height = totalHeight + 'px';
+  container.style.minHeight = totalHeight + 'px';
+  
+  const renderVisible = () => {
+    const scrollTop = scrollParent.scrollTop;
+    const viewHeight = scrollParent.clientHeight;
+    const startIdx = Math.max(0, Math.floor(scrollTop / (CARD_HEIGHT + CARD_GAP)) - BUFFER_CARDS);
+    const endIdx = Math.min(filteredSessions.length, Math.ceil((scrollTop + viewHeight) / (CARD_HEIGHT + CARD_GAP)) + BUFFER_CARDS);
+    
+    // Remove out-of-view cards
+    const existing = container.querySelectorAll('.session-card');
+    existing.forEach(card => {
+      const idx = parseInt(card.dataset.index);
+      if (idx < startIdx || idx >= endIdx) card.remove();
+    });
+    
+    // Add missing cards
+    const existingIndices = new Set(Array.from(container.querySelectorAll('.session-card')).map(c => parseInt(c.dataset.index)));
+    const fragment = document.createDocumentFragment();
+    for (let i = startIdx; i < endIdx; i++) {
+      if (existingIndices.has(i)) continue;
+      const tmp = document.createElement('div');
+      tmp.innerHTML = createSessionCard(filteredSessions[i], i);
+      const card = tmp.firstElementChild;
+      card.style.position = 'absolute';
+      card.style.top = (i * (CARD_HEIGHT + CARD_GAP)) + 'px';
+      card.style.left = '0';
+      card.style.right = '0';
+      fragment.appendChild(card);
+    }
+    container.appendChild(fragment);
+  };
+  
+  renderVisible();
+  scrollParent._virtualScrollHandler = renderVisible;
+  scrollParent.addEventListener('scroll', renderVisible, { passive: true });
+}
+
+function teardownVirtualScroll() {
+  if (!virtualScrollEnabled) return;
+  virtualScrollEnabled = false;
+  const container = document.getElementById('sessionsGrid');
+  const scrollParent = container.closest('.sessions-panel');
+  if (scrollParent._virtualScrollHandler) {
+    scrollParent.removeEventListener('scroll', scrollParent._virtualScrollHandler);
+    delete scrollParent._virtualScrollHandler;
+  }
+  container.style.position = '';
+  container.style.height = '';
+  container.style.minHeight = '';
 }
 
 function createSessionCard(session, index) {
@@ -1143,15 +1270,25 @@ function closePanel() {
 }
 
 async function refreshTranscript(sessionId) {
+  // Don't refresh if panel is hidden
+  const panel = document.getElementById('detailPanel');
+  if (!panel || panel.style.display === 'none') return;
+  
   try {
-    const response = await fetch(`/data/transcript/${sessionId}?t=` + Date.now());
+    // Only fetch last 100 entries for refresh (we already have older ones)
+    const response = await fetch(`/data/transcript/${sessionId}?limit=100`);
     const data = await response.json();
     if (data.error || !data.entries) return;
     const container = document.getElementById('logContainer');
     const wasAtBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 100;
-    const currentCount = container.querySelectorAll('.log-entry').length;
-    if (data.entries.length !== currentCount) {
-      renderTranscript(data.entries);
+    
+    const newTotal = data.total || 0;
+    if (newTotal !== transcriptTotal) {
+      // Merge: keep older loaded entries, replace tail with fresh data
+      const oldPrefix = transcriptEntries.slice(0, transcriptEntries.length - (transcriptTotal - (data.offset || 0)));
+      transcriptEntries = [...oldPrefix, ...data.entries];
+      transcriptTotal = newTotal;
+      renderTranscript(transcriptEntries);
       if (wasAtBottom) container.scrollTop = container.scrollHeight;
     }
   } catch(e) {}
@@ -1173,14 +1310,52 @@ function navigateTo(sessionKey) { openSession(sessionKey); }
 async function loadTranscript(sessionId) {
   const container = document.getElementById('logContainer');
   container.innerHTML = '<div class="loading-spinner">Loading transcript...</div>';
+  transcriptEntries = [];
+  transcriptTotal = 0;
+  transcriptOffset = 0;
   try {
-    const response = await fetch(`/data/transcript/${sessionId}?t=` + Date.now());
+    const response = await fetch(`/data/transcript/${sessionId}?limit=100`);
     const data = await response.json();
     if (data.error) { container.innerHTML = `<div class="loading-spinner">${data.error}</div>`; return; }
-    renderTranscript(data.entries || []);
+    transcriptEntries = data.entries || [];
+    transcriptTotal = data.total || transcriptEntries.length;
+    transcriptOffset = data.offset || 0;
+    renderTranscript(transcriptEntries);
+    
+    // Setup scroll-up to load more
+    if (transcriptOffset > 0) {
+      setupTranscriptInfiniteScroll(sessionId, container);
+    }
   } catch (error) {
     container.innerHTML = `<div class="loading-spinner">Failed: ${error.message}</div>`;
   }
+}
+
+let _loadingMore = false;
+function setupTranscriptInfiniteScroll(sessionId, container) {
+  container._loadMoreHandler = async () => {
+    if (_loadingMore || transcriptOffset <= 0 || container.scrollTop > 100) return;
+    _loadingMore = true;
+    const prevHeight = container.scrollHeight;
+    const loadOffset = Math.max(0, transcriptOffset - 100);
+    const loadLimit = transcriptOffset - loadOffset;
+    try {
+      const r = await fetch(`/data/transcript/${sessionId}?offset=${loadOffset}&limit=${loadLimit}`);
+      const d = await r.json();
+      if (d.entries && d.entries.length) {
+        transcriptEntries = [...d.entries, ...transcriptEntries];
+        transcriptOffset = loadOffset;
+        renderTranscript(transcriptEntries);
+        // Maintain scroll position
+        container.scrollTop = container.scrollHeight - prevHeight;
+        if (transcriptOffset <= 0) {
+          container.removeEventListener('scroll', container._loadMoreHandler);
+        }
+      }
+    } catch(e) {}
+    _loadingMore = false;
+  };
+  container.addEventListener('scroll', container._loadMoreHandler, { passive: true });
 }
 
 function renderTranscript(entries) {
