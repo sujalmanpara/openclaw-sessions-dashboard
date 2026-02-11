@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-import http.server, json, os, socketserver, glob, time, threading, asyncio, websockets, urllib.request, urllib.error, gzip, hashlib
+import http.server, json, os, socketserver, glob, time, threading, asyncio, websockets, urllib.request, urllib.error, gzip, hashlib, secrets, base64
 from datetime import datetime, timedelta
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs, urlencode
 import subprocess
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
@@ -15,6 +15,80 @@ TOPIC_NAMES_FILE = os.path.join(DIR, 'topic-names.json')
 # ── In-memory cache ──
 _sessions_cache = {'data': None, 'etag': None, 'mtime': 0}
 _sessions_cache_lock = threading.Lock()
+
+# ── OAuth Constants ──
+OAUTH_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
+OAUTH_AUTHORIZE_URL = "https://claude.ai/oauth/authorize"
+OAUTH_TOKEN_URL = "https://console.anthropic.com/v1/oauth/token"
+OAUTH_REDIRECT_URI = "https://console.anthropic.com/oauth/code/callback"
+OAUTH_SCOPES = "org:create_api_key user:profile user:inference"
+OAUTH_CREDS_FILE = os.path.join(DIR, 'oauth-creds.json')
+
+# Pending PKCE sessions: {sessionId: {verifier, createdAt}}
+_pkce_sessions = {}
+_pkce_lock = threading.Lock()
+
+def _pkce_cleanup():
+    """Remove PKCE sessions older than 10 minutes."""
+    now = time.time()
+    with _pkce_lock:
+        expired = [k for k, v in _pkce_sessions.items() if now - v['createdAt'] > 600]
+        for k in expired:
+            del _pkce_sessions[k]
+
+def _b64url(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).rstrip(b'=').decode('ascii')
+
+def _oauth_load_creds():
+    try:
+        with open(OAUTH_CREDS_FILE) as f:
+            return json.load(f)
+    except:
+        return {"accounts": {}}
+
+def _oauth_save_creds(creds):
+    with open(OAUTH_CREDS_FILE, 'w') as f:
+        json.dump(creds, f, indent=2)
+    os.chmod(OAUTH_CREDS_FILE, 0o600)
+
+def _oauth_token_request(payload):
+    """Make a POST to the OAuth token endpoint."""
+    data = json.dumps(payload).encode()
+    req = urllib.request.Request(OAUTH_TOKEN_URL, data=data, headers={
+        'Content-Type': 'application/json',
+    })
+    resp = urllib.request.urlopen(req, timeout=15)
+    return json.loads(resp.read())
+
+def _oauth_refresh_if_needed(account):
+    """Refresh token if expiring within 5 minutes. Returns updated account or None on failure."""
+    if account.get('expiresAt', 0) > time.time() + 300:
+        return account
+    try:
+        result = _oauth_token_request({
+            "grant_type": "refresh_token",
+            "client_id": OAUTH_CLIENT_ID,
+            "refresh_token": account['refreshToken'],
+        })
+        account['accessToken'] = result['access_token']
+        account['refreshToken'] = result['refresh_token']
+        account['expiresAt'] = time.time() + result.get('expires_in', 3600)
+        return account
+    except Exception as e:
+        account['refreshError'] = str(e)
+        return None
+
+def _oauth_get_usage(access_token):
+    """Fetch usage stats for an OAuth account."""
+    req = urllib.request.Request(
+        'https://api.anthropic.com/api/oauth/usage',
+        headers={
+            'Authorization': f'Bearer {access_token}',
+            'anthropic-beta': 'oauth-2025-04-20',
+        }
+    )
+    resp = urllib.request.urlopen(req, timeout=15)
+    return json.loads(resp.read())
 
 def get_system_info():
     info = {}
@@ -621,6 +695,110 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 self.wfile.write(json.dumps({'error': str(e)}).encode())
             return
 
+        if self.path == '/api/keys/oauth/start':
+            try:
+                _pkce_cleanup()
+                verifier = _b64url(secrets.token_bytes(32))
+                challenge = _b64url(hashlib.sha256(verifier.encode('ascii')).digest())
+                session_id = secrets.token_hex(16)
+                with _pkce_lock:
+                    _pkce_sessions[session_id] = {'verifier': verifier, 'createdAt': time.time()}
+                params = urlencode({
+                    'code': 'true',
+                    'client_id': OAUTH_CLIENT_ID,
+                    'response_type': 'code',
+                    'redirect_uri': OAUTH_REDIRECT_URI,
+                    'scope': OAUTH_SCOPES,
+                    'code_challenge': challenge,
+                    'code_challenge_method': 'S256',
+                    'state': verifier,
+                })
+                auth_url = f"{OAUTH_AUTHORIZE_URL}?{params}"
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({'sessionId': session_id, 'authUrl': auth_url}).encode())
+            except Exception as e:
+                self.send_response(500)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({'error': str(e)}).encode())
+            return
+
+        if self.path == '/api/keys/oauth/complete':
+            cl = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(cl).decode()) if cl else {}
+            session_id = body.get('sessionId', '')
+            raw_code = body.get('code', '')
+            try:
+                with _pkce_lock:
+                    pkce = _pkce_sessions.pop(session_id, None)
+                if not pkce:
+                    raise ValueError('Invalid or expired session. Please start over.')
+                # Parse code#state format
+                if '#' in raw_code:
+                    code, state = raw_code.split('#', 1)
+                else:
+                    code = raw_code
+                    state = pkce['verifier']
+                # Exchange code for tokens
+                result = _oauth_token_request({
+                    'grant_type': 'authorization_code',
+                    'client_id': OAUTH_CLIENT_ID,
+                    'code': code,
+                    'state': state,
+                    'redirect_uri': OAUTH_REDIRECT_URI,
+                    'code_verifier': pkce['verifier'],
+                })
+                access_token = result['access_token']
+                refresh_token = result['refresh_token']
+                expires_in = result.get('expires_in', 3600)
+                # Try to get user profile from usage endpoint to identify account
+                email = result.get('email', '') or result.get('user', {}).get('email', '')
+                subscription = result.get('subscription', '') or result.get('user', {}).get('subscription_type', '')
+                # If no email in token response, use a placeholder
+                if not email:
+                    email = f"claude-user-{secrets.token_hex(4)}"
+                # Save credentials
+                creds = _oauth_load_creds()
+                creds['accounts'][email] = {
+                    'accessToken': access_token,
+                    'refreshToken': refresh_token,
+                    'expiresAt': time.time() + expires_in,
+                    'email': email,
+                    'subscriptionType': subscription,
+                }
+                _oauth_save_creds(creds)
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({'ok': True, 'email': email, 'subscription': subscription}).encode())
+            except Exception as e:
+                self.send_response(400)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({'error': str(e)}).encode())
+            return
+
+        if self.path == '/api/keys/oauth/remove':
+            cl = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(cl).decode()) if cl else {}
+            email = body.get('email', '')
+            try:
+                creds = _oauth_load_creds()
+                creds['accounts'].pop(email, None)
+                _oauth_save_creds(creds)
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({'ok': True}).encode())
+            except Exception as e:
+                self.send_response(500)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({'error': str(e)}).encode())
+            return
+
         if self.path == '/api/pin':
             content_length = int(self.headers['Content-Length'])
             body = self.rfile.read(content_length).decode()
@@ -711,6 +889,46 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         super().do_POST()
     
     def do_GET(self):
+        if self.path.startswith('/api/keys/oauth/usage'):
+            try:
+                creds = _oauth_load_creds()
+                accounts = creds.get('accounts', {})
+                result = {}
+                for email, account in accounts.items():
+                    refreshed = _oauth_refresh_if_needed(account)
+                    if not refreshed:
+                        result[email] = {'error': 'refresh_failed', 'message': account.get('refreshError', 'Token refresh failed. Please re-login.')}
+                        continue
+                    # Save refreshed tokens
+                    accounts[email] = refreshed
+                    try:
+                        usage = _oauth_get_usage(refreshed['accessToken'])
+                        result[email] = {'ok': True, 'usage': usage, 'email': email, 'subscriptionType': refreshed.get('subscriptionType', '')}
+                    except urllib.error.HTTPError as e:
+                        try:
+                            body = json.loads(e.read())
+                            msg = body.get('error', {}).get('message', str(e))
+                        except:
+                            msg = str(e)
+                        if e.code == 401:
+                            result[email] = {'error': 'auth_failed', 'message': 'Re-login needed'}
+                        else:
+                            result[email] = {'error': 'api_error', 'message': msg}
+                    except Exception as e:
+                        result[email] = {'error': 'api_error', 'message': str(e)}
+                _oauth_save_creds(creds)
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                self.wfile.write(json.dumps(result).encode())
+            except Exception as e:
+                self.send_response(500)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({'error': str(e)}).encode())
+            return
+
         if self.path.startswith('/api/keys/usage'):
             try:
                 # Load usage stats from auth-profiles.json

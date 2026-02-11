@@ -655,6 +655,48 @@ body{
   flex:1;min-width:40px;max-width:80px;overflow:hidden;
 }
 .key-usage-bar-fill{height:100%;border-radius:2px;transition:width .3s}
+
+/* ── OAuth Usage Section ── */
+.oauth-section{margin-bottom:16px}
+.oauth-section h3{font-size:12px;color:var(--text-secondary);margin-bottom:8px;display:flex;align-items:center;gap:6px}
+.oauth-login-btn{
+  background:linear-gradient(135deg,#7c6ff7,#5b4fd6);color:#fff;
+  border:none;padding:8px 16px;border-radius:var(--radius);
+  cursor:pointer;font-size:13px;font-weight:500;font-family:inherit;
+  transition:opacity .15s;display:flex;align-items:center;gap:6px;
+}
+.oauth-login-btn:hover{opacity:.85}
+.oauth-code-input{
+  display:flex;gap:8px;margin-top:8px;align-items:center;
+}
+.oauth-code-input input{
+  flex:1;background:var(--bg-elevated);border:1px solid var(--border-default);
+  border-radius:var(--radius);padding:6px 10px;color:var(--text-primary);
+  font-size:12px;font-family:var(--font-mono);
+}
+.oauth-code-input input::placeholder{color:var(--text-dim)}
+.oauth-code-input input:focus{outline:none;border-color:var(--accent)}
+.oauth-account{
+  background:var(--bg-elevated);border:1px solid var(--border-subtle);
+  border-radius:var(--radius);padding:10px 14px;margin-bottom:8px;
+}
+.oauth-account-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.oauth-account-email{font-size:13px;font-weight:500;color:var(--text-primary);display:flex;align-items:center;gap:6px}
+.oauth-account-actions{display:flex;gap:4px}
+.oauth-remove-btn{
+  background:none;border:1px solid rgba(239,68,68,.2);color:rgba(239,68,68,.6);
+  padding:2px 8px;border-radius:4px;cursor:pointer;font-size:10px;font-family:inherit;
+}
+.oauth-remove-btn:hover{border-color:rgba(239,68,68,.4);color:rgba(239,68,68,.8)}
+.oauth-usage-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.oauth-usage-item{display:flex;flex-direction:column;gap:4px}
+.oauth-usage-label{font-size:10px;color:var(--text-dim);text-transform:uppercase;letter-spacing:.3px;display:flex;justify-content:space-between}
+.oauth-usage-bar{height:6px;background:var(--bg-base);border-radius:3px;overflow:hidden}
+.oauth-usage-fill{height:100%;border-radius:3px;transition:width .5s}
+.oauth-usage-value{font-size:11px;color:var(--text-secondary);font-weight:500}
+.oauth-reset-time{font-size:10px;color:var(--text-dim)}
+.oauth-error{font-size:11px;color:rgba(239,68,68,.7);padding:4px 0}
+.oauth-extra{font-size:11px;color:var(--text-muted);margin-top:4px;padding:4px 8px;background:var(--bg-base);border-radius:4px}
 </style>
 </head>
 <body>
@@ -1693,10 +1735,20 @@ function escapeHtml(text) {
 let keysData = [];
 let keysTestResults = {};
 let keysUsageData = {};
+let oauthAccounts = {};  // {email: {ok, usage, error, ...}}
+let oauthPending = null; // {sessionId, authUrl}
+let oauthRefreshInterval = null;
 
 async function openKeysModal() {
-  await Promise.all([loadKeysData(), loadKeysUsage()]);
+  await Promise.all([loadKeysData(), loadKeysUsage(), loadOAuthUsage()]);
   renderKeysModal();
+  // Auto-refresh OAuth usage every 60s while modal is open
+  if (oauthRefreshInterval) clearInterval(oauthRefreshInterval);
+  oauthRefreshInterval = setInterval(async () => {
+    if (!document.getElementById('keysModal')) { clearInterval(oauthRefreshInterval); return; }
+    await loadOAuthUsage();
+    renderKeysModal();
+  }, 60000);
 }
 
 async function loadKeysData() {
@@ -1789,12 +1841,15 @@ function renderKeysModal() {
     <div class="keys-summary-item"><span class="keys-summary-label">Last Rotation</span><span class="keys-summary-value" style="font-size:12px">${summary.lastRotation ? timeAgo(summary.lastRotation) : '—'}</span></div>
   </div>`;
 
+  const oauthHtml = renderOAuthSection();
+
   overlay.innerHTML = `<div class="modal">
     <div class="modal-header">
       <h2>&#9881; API Keys</h2>
-      <button class="btn" onclick="document.getElementById('keysModal').remove()">&times;</button>
+      <button class="btn" onclick="if(oauthRefreshInterval)clearInterval(oauthRefreshInterval);document.getElementById('keysModal').remove()">&times;</button>
     </div>
     <div class="modal-body">
+      ${oauthHtml}
       ${summaryHtml}
       ${enabled.map((k,i) => renderCard(k, i, true)).join('')}
       ${disabled.length ? '<div style="font-size:11px;color:var(--text-dim);margin:12px 0 4px;text-transform:uppercase;letter-spacing:1px">Disabled</div>' : ''}
@@ -1802,7 +1857,7 @@ function renderKeysModal() {
     </div>
     <div class="modal-footer">
       <button class="btn" onclick="testAllKeys()">Test All</button>
-      <button class="btn" onclick="document.getElementById('keysModal').remove()">Close</button>
+      <button class="btn" onclick="if(oauthRefreshInterval)clearInterval(oauthRefreshInterval);document.getElementById('keysModal').remove()">Close</button>
     </div>
   </div>`;
   document.body.appendChild(overlay);
@@ -1867,6 +1922,152 @@ async function testAllKeys() {
     Object.assign(keysTestResults, d);
   } catch(e) { showToast('error','Error',e.message); }
   renderKeysModal();
+}
+
+// ── OAuth Functions ──
+async function loadOAuthUsage() {
+  try {
+    const r = await fetch('/api/keys/oauth/usage?t=' + Date.now());
+    oauthAccounts = await r.json();
+  } catch(e) { oauthAccounts = {}; }
+}
+
+async function startOAuthLogin() {
+  try {
+    const r = await fetch('/api/keys/oauth/start', {method:'POST'});
+    const d = await r.json();
+    if (d.error) { showToast('error','OAuth Error', d.error); return; }
+    oauthPending = d;
+    window.open(d.authUrl, '_blank');
+    renderKeysModal();
+  } catch(e) { showToast('error','Error',e.message); }
+}
+
+async function completeOAuthLogin() {
+  const input = document.getElementById('oauthCodeInput');
+  if (!input || !input.value.trim() || !oauthPending) return;
+  const code = input.value.trim();
+  try {
+    const r = await fetch('/api/keys/oauth/complete', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({sessionId: oauthPending.sessionId, code})
+    });
+    const d = await r.json();
+    if (d.error) { showToast('error','OAuth Error', d.error); return; }
+    oauthPending = null;
+    showToast('success','Connected', `✅ ${d.email}`);
+    await loadOAuthUsage();
+    renderKeysModal();
+  } catch(e) { showToast('error','Error',e.message); }
+}
+
+async function removeOAuthAccount(email) {
+  if (!confirm(`Remove ${email}?`)) return;
+  try {
+    await fetch('/api/keys/oauth/remove', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({email})
+    });
+    delete oauthAccounts[email];
+    renderKeysModal();
+  } catch(e) { showToast('error','Error',e.message); }
+}
+
+function getUsageColor(pct) {
+  if (pct < 50) return 'var(--green)';
+  if (pct < 80) return 'var(--yellow)';
+  return 'var(--red)';
+}
+
+function formatResetTime(isoStr) {
+  if (!isoStr) return '';
+  const reset = new Date(isoStr);
+  const diff = reset - Date.now();
+  if (diff <= 0) return 'resetting...';
+  const h = Math.floor(diff / 3600000);
+  const m = Math.floor((diff % 3600000) / 60000);
+  return h > 0 ? `${h}h ${m}m` : `${m}m`;
+}
+
+function renderOAuthSection() {
+  const accounts = Object.entries(oauthAccounts).filter(([k]) => k !== 'error');
+  const hasAccounts = accounts.length > 0;
+
+  let html = '<div class="oauth-section"><h3>☁️ Claude Account Usage</h3>';
+
+  // Render each connected account's usage
+  accounts.forEach(([email, data]) => {
+    html += `<div class="oauth-account">
+      <div class="oauth-account-header">
+        <div class="oauth-account-email">✅ ${escapeHtml(email)}${data.subscriptionType ? ` <span style="font-size:10px;color:var(--text-dim)">(${escapeHtml(data.subscriptionType)})</span>` : ''}</div>
+        <div class="oauth-account-actions">
+          <button class="oauth-remove-btn" onclick="removeOAuthAccount('${escapeHtml(email)}')">Remove</button>
+        </div>
+      </div>`;
+
+    if (data.error) {
+      html += `<div class="oauth-error">⚠️ ${escapeHtml(data.message || data.error)}</div>`;
+    } else if (data.usage) {
+      const u = data.usage;
+      html += '<div class="oauth-usage-grid">';
+
+      // 5-hour usage
+      if (u.five_hour) {
+        const pct = u.five_hour.utilization || 0;
+        html += `<div class="oauth-usage-item">
+          <div class="oauth-usage-label"><span>Session (5h)</span><span>${pct.toFixed(1)}%</span></div>
+          <div class="oauth-usage-bar"><div class="oauth-usage-fill" style="width:${Math.min(pct,100)}%;background:${getUsageColor(pct)}"></div></div>
+          <div class="oauth-reset-time">Resets in ${formatResetTime(u.five_hour.resets_at)}</div>
+        </div>`;
+      }
+
+      // 7-day usage
+      if (u.seven_day) {
+        const pct = u.seven_day.utilization || 0;
+        html += `<div class="oauth-usage-item">
+          <div class="oauth-usage-label"><span>Weekly (7d)</span><span>${pct.toFixed(1)}%</span></div>
+          <div class="oauth-usage-bar"><div class="oauth-usage-fill" style="width:${Math.min(pct,100)}%;background:${getUsageColor(pct)}"></div></div>
+          <div class="oauth-reset-time">Resets in ${formatResetTime(u.seven_day.resets_at)}</div>
+        </div>`;
+      }
+
+      // Sonnet usage
+      if (u.seven_day_sonnet && u.seven_day_sonnet.utilization !== undefined) {
+        const pct = u.seven_day_sonnet.utilization || 0;
+        html += `<div class="oauth-usage-item">
+          <div class="oauth-usage-label"><span>Sonnet (7d)</span><span>${pct.toFixed(1)}%</span></div>
+          <div class="oauth-usage-bar"><div class="oauth-usage-fill" style="width:${Math.min(pct,100)}%;background:${getUsageColor(pct)}"></div></div>
+        </div>`;
+      }
+
+      html += '</div>';
+
+      // Extra usage
+      if (u.extra_usage && u.extra_usage.is_enabled) {
+        html += `<div class="oauth-extra">💳 Extra usage: $${(u.extra_usage.used_credits||0).toFixed(2)} / $${u.extra_usage.monthly_limit||0}</div>`;
+      }
+    }
+    html += '</div>';
+  });
+
+  // Login button
+  if (oauthPending) {
+    html += `<div style="margin-top:8px">
+      <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px">Paste the authorization code from the browser:</div>
+      <div class="oauth-code-input">
+        <input type="text" id="oauthCodeInput" placeholder="code#state" onkeydown="if(event.key==='Enter')completeOAuthLogin()">
+        <button class="btn primary" onclick="completeOAuthLogin()">Connect</button>
+        <button class="btn" onclick="oauthPending=null;renderKeysModal()">Cancel</button>
+      </div>
+    </div>`;
+  } else {
+    html += `<button class="oauth-login-btn" onclick="startOAuthLogin()" style="margin-top:8px">
+      ☁️ ${hasAccounts ? 'Add another account' : 'Login with Claude'}
+    </button>`;
+  }
+
+  html += '</div>';
+  return html;
 }
 </script>
 </body>
