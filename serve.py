@@ -916,6 +916,14 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         super().do_POST()
     
     def do_GET(self):
+        if self.path.startswith('/session/'):
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/html')
+            self.end_headers()
+            with open(os.path.join(DIR, 'session.html'), 'rb') as f:
+                self.wfile.write(f.read())
+            return
+
         if self.path == '/keys' or self.path == '/keys/':
             self.send_response(200)
             self.send_header('Content-Type', 'text/html')

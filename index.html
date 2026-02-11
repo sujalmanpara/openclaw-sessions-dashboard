@@ -350,6 +350,12 @@ body{
   display:flex;flex-direction:column;
   z-index:60;
   box-shadow:-8px 0 24px rgba(0,0,0,.4);
+  transition:all .2s ease;
+}
+.detail-panel.detached{
+  width:100vw;left:0;right:0;
+  border-left:none;box-shadow:none;
+  z-index:100;
 }
 
 .panel-header{
@@ -826,7 +832,9 @@ body{
     <div class="panel-header">
       <div class="panel-title" id="panelTitle">Select a session</div>
       <div class="panel-controls">
-        <button class="btn" onclick="copyTranscript()">Copy</button>
+        <button class="btn" onclick="copyTranscript()" title="Copy transcript">Copy</button>
+        <button class="btn" onclick="toggleDetachPanel()" id="detachBtn" title="Fullscreen">⧉</button>
+        <button class="btn" onclick="openInNewTab()" title="Open in new tab">↗</button>
         <button class="btn" onclick="closeDetailPanel()">&times;</button>
       </div>
     </div>
@@ -1588,10 +1596,26 @@ function renderTranscript(entries) {
 }
 
 function closeDetailPanel() {
-  document.getElementById('detailPanel').style.display = 'none';
+  const panel = document.getElementById('detailPanel');
+  panel.style.display = 'none';
+  panel.classList.remove('detached');
+  document.getElementById('detachBtn').textContent = '⧉';
   selectedSession = null;
   document.getElementById('breadcrumb').innerHTML = '';
   if (window._transcriptInterval) { clearInterval(window._transcriptInterval); window._transcriptInterval = null; }
+}
+
+function toggleDetachPanel() {
+  const panel = document.getElementById('detailPanel');
+  const btn = document.getElementById('detachBtn');
+  panel.classList.toggle('detached');
+  btn.textContent = panel.classList.contains('detached') ? '⊟' : '⧉';
+  btn.title = panel.classList.contains('detached') ? 'Restore' : 'Fullscreen';
+}
+
+function openInNewTab() {
+  if (!selectedSession) return;
+  window.open('/session/' + encodeURIComponent(selectedSession.key), '_blank');
 }
 
 function toggleChildren(index) {

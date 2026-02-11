@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Session — Cozy Dashboard</title>
+<style>
+:root{
+  --bg-base:#0a0a0f;--bg-surface:#12121a;--bg-elevated:#1a1a25;
+  --text-primary:rgba(255,255,255,.87);--text-secondary:rgba(255,255,255,.6);
+  --text-muted:rgba(255,255,255,.38);--text-dim:rgba(255,255,255,.2);
+  --border-default:rgba(255,255,255,.08);--border-subtle:rgba(255,255,255,.04);
+  --accent:#818cf8;--green:#22c55e;--yellow:#eab308;--red:#ef4444;--blue:#3b82f6;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg-base);color:var(--text-primary);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;height:100dvh;display:flex;flex-direction:column;overflow:hidden}
+.header{padding:10px 16px;border-bottom:1px solid var(--border-subtle);background:var(--bg-surface);display:flex;justify-content:space-between;align-items:center;flex-shrink:0}
+.header-left{display:flex;align-items:center;gap:10px}
+.header-title{font-size:15px;font-weight:600}
+.header-meta{font-size:11px;color:var(--text-dim);display:flex;gap:8px;align-items:center}
+.back-link{font-size:12px;color:var(--accent);text-decoration:none;opacity:.7}
+.back-link:hover{opacity:1}
+.badge{font-size:10px;padding:1px 6px;border-radius:3px;border:1px solid}
+.badge-subagent{background:rgba(124,111,247,.06);color:rgba(124,111,247,.6);border-color:rgba(124,111,247,.1)}
+.badge-main{background:rgba(34,197,94,.06);color:rgba(34,197,94,.6);border-color:rgba(34,197,94,.1)}
+.badge-cron{background:rgba(234,179,8,.06);color:rgba(234,179,8,.6);border-color:rgba(234,179,8,.1)}
+.badge-telegram{background:rgba(59,130,246,.06);color:rgba(59,130,246,.6);border-color:rgba(59,130,246,.1)}
+.badge-group{background:rgba(59,130,246,.06);color:rgba(59,130,246,.6);border-color:rgba(59,130,246,.1)}
+.badge-other{background:rgba(255,255,255,.04);color:var(--text-muted);border-color:rgba(255,255,255,.06)}
+.tabs{display:flex;gap:0;border-bottom:1px solid var(--border-subtle);flex-shrink:0;background:var(--bg-elevated);padding:0 16px}
+.tab{padding:8px 16px;font-size:12px;color:var(--text-muted);background:none;border:none;border-bottom:2px solid transparent;cursor:pointer;transition:all .15s}
+.tab:hover{color:var(--text-secondary)}
+.tab.active{color:var(--accent);border-bottom-color:var(--accent)}
+.log-container{flex:1;overflow-y:auto;padding:12px 16px;font-family:'SF Mono',Monaco,Consolas,monospace;font-size:12px;line-height:1.6}
+.log-entry{padding:6px 0;border-bottom:1px solid var(--border-subtle)}
+.log-role{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px}
+.log-role.user{color:rgba(59,130,246,.7)}
+.log-role.assistant{color:rgba(34,197,94,.7)}
+.log-role.system{color:rgba(234,179,8,.7)}
+.log-role.tool{color:rgba(168,85,247,.7)}
+.log-content{white-space:pre-wrap;word-break:break-word;color:var(--text-secondary)}
+.log-content code{background:var(--bg-elevated);padding:1px 4px;border-radius:3px;font-size:11px}
+.log-content pre{background:var(--bg-elevated);padding:8px;border-radius:4px;overflow-x:auto;margin:4px 0}
+.log-tool{font-size:11px;color:var(--text-dim);padding:2px 0}
+.log-tool-name{color:rgba(168,85,247,.6);font-weight:500}
+.log-thinking{color:var(--text-dim);font-style:italic;font-size:11px;border-left:2px solid var(--border-default);padding-left:8px;margin:4px 0}
+.log-timestamp{font-size:9px;color:var(--text-dim);float:right}
+.log-cost{font-size:9px;color:var(--text-dim);margin-left:8px}
+.subagents-container{flex:1;overflow-y:auto;padding:16px;display:none}
+.subagent-card{background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:6px;padding:10px 12px;margin-bottom:8px;cursor:pointer;transition:border-color .15s}
+.subagent-card:hover{border-color:var(--border-default)}
+.subagent-card-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
+.subagent-card-name{font-size:13px;font-weight:500;color:var(--text-primary)}
+.subagent-card-meta{font-size:10px;color:var(--text-dim);display:flex;gap:8px;flex-wrap:wrap}
+.subagent-card-status{font-size:10px;padding:1px 6px;border-radius:3px}
+.subagent-card-status.running{background:rgba(34,197,94,.1);color:rgba(34,197,94,.7)}
+.subagent-card-status.completed{background:rgba(59,130,246,.1);color:rgba(59,130,246,.7)}
+.subagent-card-status.error{background:rgba(239,68,68,.1);color:rgba(239,68,68,.7)}
+.send-bar{padding:8px 12px;border-top:1px solid var(--border-subtle);background:var(--bg-surface);display:flex;gap:8px;flex-shrink:0;align-items:center}
+.send-bar input{flex:1;padding:8px 12px;background:var(--bg-elevated);border:1px solid var(--border-default);border-radius:6px;color:var(--text-primary);font-size:13px;outline:none}
+.send-bar input:focus{border-color:var(--accent)}
+.send-btn{padding:8px 12px;background:var(--accent);border:none;border-radius:6px;color:#fff;cursor:pointer;font-size:13px}
+.send-btn:hover{opacity:.85}
+.btn{padding:4px 10px;background:var(--bg-elevated);border:1px solid var(--border-subtle);border-radius:4px;color:var(--text-muted);cursor:pointer;font-size:11px}
+.btn:hover{border-color:var(--border-default);color:var(--text-secondary)}
+.loading{text-align:center;padding:40px;color:var(--text-dim)}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-left">
+    <a href="/" class="back-link">← Dashboard</a>
+    <div class="header-title" id="sessionTitle">Loading...</div>
+    <div class="header-meta" id="sessionMeta"></div>
+  </div>
+  <div style="display:flex;gap:4px">
+    <button class="btn" onclick="copyTranscript()">Copy</button>
+    <button class="btn" onclick="location.reload()">↻</button>
+  </div>
+</div>
+
+<div class="tabs" id="tabs" style="display:none">
+  <button class="tab active" data-tab="transcript" onclick="switchTab('transcript',this)">Transcript</button>
+  <button class="tab" data-tab="subagents" onclick="switchTab('subagents',this)">Sub-agents</button>
+</div>
+
+<div class="log-container" id="logContainer">
+  <div class="loading">Loading session...</div>
+</div>
+<div class="subagents-container" id="subagentsContainer"></div>
+
+<div class="send-bar" id="sendBar">
+  <input type="text" id="sendInput" placeholder="Send a message to this session…" autocomplete="off"
+    onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMessage()}">
+  <button class="send-btn" onclick="sendMessage()">Send</button>
+</div>
+
+<script>
+const sessionKey = decodeURIComponent(location.pathname.replace('/session/', ''));
+let session = null;
+let allSessions = [];
+let transcriptEntries = [];
+let transcriptTotal = 0;
+let transcriptOffset = 0;
+
+function escapeHtml(t) { if (!t) return ''; const d = document.createElement('div'); d.textContent = t; return d.innerHTML; }
+
+function formatTime(ts) {
+  if (!ts) return '—';
+  const diff = Date.now() - ts;
+  if (diff < 60000) return Math.floor(diff/1000) + 's';
+  if (diff < 3600000) return Math.floor(diff/60000) + 'm';
+  if (diff < 86400000) return Math.floor(diff/3600000) + 'h';
+  return Math.floor(diff/86400000) + 'd';
+}
+
+function formatTimestamp(ts) {
+  if (!ts) return '';
+  return new Date(ts).toLocaleTimeString('en-US', {hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false});
+}
+
+function formatBadgeLabel(type) {
+  const labels = {main:'main',group:'group',telegram:'telegram',cron:'cron','cron-run':'run',subagent:'sub-agent',other:'other'};
+  return labels[type] || type;
+}
+
+function getSessionName(s) {
+  if (s.label) return s.label;
+  if (s.displayName) return s.displayName;
+  return s.key.split(':').pop().slice(0, 12);
+}
+
+function switchTab(tab, btn) {
+  document.querySelectorAll('.tab').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  document.getElementById('logContainer').style.display = tab === 'transcript' ? '' : 'none';
+  document.getElementById('sendBar').style.display = tab === 'transcript' ? '' : 'none';
+  document.getElementById('subagentsContainer').style.display = tab === 'subagents' ? '' : 'none';
+  if (tab === 'subagents') renderSubagents();
+}
+
+function renderSubagents() {
+  const container = document.getElementById('subagentsContainer');
+  const children = allSessions.filter(s => {
+    if (s.sessionType !== 'subagent') return false;
+    return s.parentKey === session.key || s.key.startsWith(session.key.replace(/:main$/, '') + ':subagent:');
+  }).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+
+  let agents = children;
+  if (!agents.length) {
+    const childKeys = (session.children || []).map(c => c.key);
+    agents = allSessions.filter(s => childKeys.includes(s.key)).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+  }
+
+  if (!agents.length) {
+    container.innerHTML = '<div style="text-align:center;color:var(--text-dim);padding:40px;font-size:12px">No sub-agents found</div>';
+    return;
+  }
+
+  container.innerHTML = `<div style="font-size:11px;color:var(--text-dim);margin-bottom:8px">${agents.length} sub-agent${agents.length !== 1 ? 's' : ''}</div>` +
+    agents.map(s => {
+      const status = s.status === 'running' ? 'running' : (s.abortedLastRun ? 'error' : 'completed');
+      const statusLabel = status === 'running' ? '● running' : (status === 'error' ? '✗ error' : '✓ done');
+      const name = s.label || s.displayName || s.key.split(':').pop().slice(0, 8);
+      const tokens = s.totalTokens ? `${(s.totalTokens/1000).toFixed(1)}k tok` : '';
+      const model = s.model ? s.model.split('/').pop() : '';
+      const ago = s.updatedAt ? formatTime(s.updatedAt) + ' ago' : '';
+      return `<div class="subagent-card" onclick="window.open('/session/${encodeURIComponent(s.key)}','_blank')">
+        <div class="subagent-card-header">
+          <div class="subagent-card-name">${escapeHtml(name)}</div>
+          <span class="subagent-card-status ${status}">${statusLabel}</span>
+        </div>
+        <div class="subagent-card-meta">
+          ${model ? `<span>🤖 ${escapeHtml(model)}</span>` : ''}
+          ${tokens ? `<span>📊 ${tokens}</span>` : ''}
+          ${ago ? `<span>🕐 ${ago}</span>` : ''}
+        </div>
+      </div>`;
+    }).join('');
+}
+
+function renderTranscript(entries) {
+  const container = document.getElementById('logContainer');
+  if (!entries.length) { container.innerHTML = '<div class="loading">No transcript entries</div>'; return; }
+  container.innerHTML = entries.map(entry => {
+    const role = entry.role || 'unknown';
+    const ts = entry.timestamp ? formatTimestamp(entry.timestamp) : '';
+    const cost = entry.usage?.cost?.total ? `$${entry.usage.cost.total.toFixed(4)}` : '';
+
+    let content = '';
+    if (Array.isArray(entry.content)) {
+      content = entry.content.map(block => {
+        if (block.type === 'text') return escapeHtml(block.text || '');
+        if (block.type === 'thinking') return `<div class="log-thinking">${escapeHtml((block.thinking || '').slice(0, 500))}${(block.thinking || '').length > 500 ? '...' : ''}</div>`;
+        if (block.type === 'toolCall') return `<div class="log-tool">⚡ <span class="log-tool-name">${escapeHtml(block.name || 'tool')}</span>(${escapeHtml(JSON.stringify(block.arguments || {}).slice(0, 200))})</div>`;
+        if (block.type === 'toolResult') return `<div class="log-tool">↩ ${escapeHtml((typeof block.content === 'string' ? block.content : JSON.stringify(block.content || '')).slice(0, 300))}</div>`;
+        return escapeHtml(JSON.stringify(block).slice(0, 200));
+      }).join('\n');
+    } else if (typeof entry.content === 'string') {
+      content = escapeHtml(entry.content);
+    }
+
+    return `<div class="log-entry">
+      <div class="log-role ${role}">${role} ${ts ? `<span class="log-timestamp">${ts}</span>` : ''}${cost ? `<span class="log-cost">${cost}</span>` : ''}</div>
+      <div class="log-content">${content}</div>
+    </div>`;
+  }).join('');
+}
+
+async function loadTranscript(sessionId) {
+  const container = document.getElementById('logContainer');
+  container.innerHTML = '<div class="loading">Loading transcript...</div>';
+  try {
+    const r = await fetch(`/data/transcript/${sessionId}?limit=200`);
+    const d = await r.json();
+    if (d.error) { container.innerHTML = `<div class="loading">${d.error}</div>`; return; }
+    transcriptEntries = d.entries || [];
+    transcriptTotal = d.total || transcriptEntries.length;
+    transcriptOffset = d.offset || 0;
+    renderTranscript(transcriptEntries);
+    container.scrollTop = container.scrollHeight;
+    if (transcriptOffset > 0) setupInfiniteScroll(sessionId, container);
+  } catch(e) { container.innerHTML = `<div class="loading">Failed: ${e.message}</div>`; }
+}
+
+let _loadingMore = false;
+function setupInfiniteScroll(sessionId, container) {
+  container.addEventListener('scroll', async function handler() {
+    if (_loadingMore || transcriptOffset <= 0 || container.scrollTop > 100) return;
+    _loadingMore = true;
+    const prevHeight = container.scrollHeight;
+    const loadOffset = Math.max(0, transcriptOffset - 100);
+    const loadLimit = transcriptOffset - loadOffset;
+    try {
+      const r = await fetch(`/data/transcript/${sessionId}?offset=${loadOffset}&limit=${loadLimit}`);
+      const d = await r.json();
+      if (d.entries?.length) {
+        transcriptEntries = [...d.entries, ...transcriptEntries];
+        transcriptOffset = loadOffset;
+        renderTranscript(transcriptEntries);
+        container.scrollTop = container.scrollHeight - prevHeight;
+        if (transcriptOffset <= 0) container.removeEventListener('scroll', handler);
+      }
+    } catch(e) {}
+    _loadingMore = false;
+  });
+}
+
+async function refreshTranscript(sessionId) {
+  try {
+    const r = await fetch(`/data/transcript/${sessionId}?limit=100`);
+    const d = await r.json();
+    if (!d.entries) return;
+    const container = document.getElementById('logContainer');
+    const wasAtBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 100;
+    const newTotal = d.total || 0;
+    if (newTotal !== transcriptTotal) {
+      const oldPrefix = transcriptEntries.slice(0, transcriptEntries.length - (transcriptTotal - (d.offset || 0)));
+      transcriptEntries = [...oldPrefix, ...d.entries];
+      transcriptTotal = newTotal;
+      renderTranscript(transcriptEntries);
+      if (wasAtBottom) container.scrollTop = container.scrollHeight;
+    }
+  } catch(e) {}
+}
+
+function copyTranscript() {
+  const text = transcriptEntries.map(e => {
+    const role = e.role || 'unknown';
+    let content = '';
+    if (Array.isArray(e.content)) content = e.content.map(b => b.text || b.thinking || '').filter(Boolean).join('\n');
+    else content = e.content || '';
+    return `[${role}] ${content}`;
+  }).join('\n\n');
+  navigator.clipboard.writeText(text);
+}
+
+async function sendMessage() {
+  const input = document.getElementById('sendInput');
+  const msg = input.value.trim();
+  if (!msg || !session) return;
+  input.value = '';
+  try {
+    await fetch('/api/session/send', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({sessionKey: session.key, message: msg})
+    });
+  } catch(e) { console.error(e); }
+}
+
+async function init() {
+  try {
+    // Load all sessions to find our session
+    const r = await fetch('/data/sessions.json');
+    const d = await r.json();
+    allSessions = d.sessions || [];
+    session = allSessions.find(s => s.key === sessionKey);
+    
+    if (!session) {
+      document.getElementById('sessionTitle').textContent = 'Session not found';
+      document.getElementById('logContainer').innerHTML = `<div class="loading">Session key: ${escapeHtml(sessionKey)}<br>Not found in active sessions.</div>`;
+      return;
+    }
+
+    // Update header
+    document.getElementById('sessionTitle').textContent = getSessionName(session);
+    document.title = getSessionName(session) + ' — Cozy Dashboard';
+    document.getElementById('sessionMeta').innerHTML = `
+      <span>${session.channel || '—'}</span>
+      <span>${session.sessionId?.slice(0, 8) || '—'}</span>
+      <span>${formatTime(session.updatedAt)} ago</span>
+      <span class="badge badge-${session.sessionType || 'other'}">${formatBadgeLabel(session.sessionType || 'other')}</span>
+      ${session.totalTokens ? `<span>${(session.totalTokens/1000).toFixed(1)}k tokens</span>` : ''}
+      ${session.model ? `<span>${session.model.split('/').pop()}</span>` : ''}
+    `;
+
+    // Show tabs if has sub-agents
+    const hasSubagents = (session.children || []).some(c => c.key?.includes(':subagent:')) ||
+      allSessions.some(s => s.sessionType === 'subagent' && s.parentKey === session.key);
+    if (hasSubagents) document.getElementById('tabs').style.display = '';
+
+    // Load transcript
+    await loadTranscript(session.sessionId);
+
+    // Live polling
+    setInterval(() => refreshTranscript(session.sessionId), 3000);
+  } catch(e) {
+    document.getElementById('logContainer').innerHTML = `<div class="loading">Error: ${e.message}</div>`;
+  }
+}
+
+init();
+</script>
+</body>
+</html>
