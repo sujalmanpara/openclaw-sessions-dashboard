@@ -405,6 +405,122 @@ body{
 .subagent-card-status.running{background:rgba(74,222,128,.1);color:rgba(74,222,128,.8)}
 .subagent-card-status.completed{background:rgba(96,165,250,.1);color:rgba(96,165,250,.8)}
 .subagent-card-status.error{background:rgba(248,113,113,.1);color:rgba(248,113,113,.8)}
+
+/* ── Swarm Map ── */
+.swarm-map {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+  background: var(--hull);
+  border-radius: var(--radius);
+  position: relative;
+}
+
+.swarm-root {
+  background: var(--rack);
+  border: 1px solid var(--amber);
+  box-shadow: 0 0 10px var(--amber-glow);
+  padding: 8px 16px;
+  border-radius: var(--radius);
+  text-align: center;
+  z-index: 2;
+}
+
+.swarm-root-label {
+  font-size: 9px;
+  color: var(--amber);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 2px;
+}
+
+.swarm-root-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.swarm-tree-line {
+  width: 1px;
+  height: 20px;
+  background: var(--wire-bright);
+  position: relative;
+}
+
+.swarm-children {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  justify-content: center;
+  width: 100%;
+}
+
+.swarm-node {
+  background: var(--shelf);
+  border: 1px solid var(--wire);
+  border-radius: var(--radius);
+  padding: 10px;
+  width: 200px;
+  position: relative;
+  transition: all .15s;
+  cursor: pointer;
+}
+
+.swarm-node:hover {
+  border-color: var(--wire-bright);
+  transform: translateY(-2px);
+  background: var(--rack);
+}
+
+.swarm-node.active {
+  border-color: var(--led-green);
+  box-shadow: 0 0 8px rgba(74,222,128,.1);
+}
+
+.swarm-node-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.swarm-node-name {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.swarm-node-status {
+  font-size: 8px;
+  text-transform: uppercase;
+  padding: 1px 4px;
+  border-radius: 2px;
+  background: var(--hull);
+}
+
+.swarm-node-task {
+  font-size: 10px;
+  color: var(--ink-3);
+  font-style: italic;
+  margin-bottom: 8px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  line-height: 1.2;
+}
+
+.swarm-node-activity {
+  background: var(--hull);
+  padding: 4px 6px;
+  border-radius: 2px;
+  font-size: 9px;
+  color: var(--ink-2);
+  border-left: 2px solid var(--amber);
+}
+
 .panel-meta{
   padding:4px 12px;font-size:10px;color:var(--ink-4);
   border-bottom:1px solid var(--wire);
@@ -1401,31 +1517,40 @@ function renderSubagentsPanel(session) {
     container.innerHTML = '<div style="text-align:center;color:var(--ink-4);padding:16px;font-size:10px">no sub-agents found</div>';
     return;
   }
-  renderSubagentCards(container, agents);
-}
 
-function renderSubagentCards(container, agents) {
-  container.innerHTML = `<div style="font-size:9px;color:var(--ink-4);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">${agents.length} sub-agent${agents.length !== 1 ? 's' : ''}</div>` +
-    agents.map(s => {
-      const status = s.status === 'running' ? 'running' : (s.abortedLastRun ? 'error' : 'completed');
-      const statusLabel = status === 'running' ? '● running' : (status === 'error' ? '✗ error' : '✓ done');
-      const name = s.label || s.displayName || s.key.split(':').pop().slice(0, 8);
-      const tokens = s.totalTokens ? `${(s.totalTokens/1000).toFixed(1)}k tok` : '';
-      const model = s.model ? s.model.split('/').pop() : '';
-      const ago = s.updatedAt ? formatTime(s.updatedAt) + ' ago' : '';
-      return `<div class="subagent-card" onclick="openSession('${escapeHtml(s.key)}')">
-        <div class="subagent-card-header">
-          <div class="subagent-card-name">${escapeHtml(name)}</div>
-          <span class="subagent-card-status ${status}">${statusLabel}</span>
-        </div>
-        <div class="subagent-card-meta">
-          ${model ? `<span>${escapeHtml(model)}</span>` : ''}
-          ${tokens ? `<span>${tokens}</span>` : ''}
-          ${ago ? `<span>${ago}</span>` : ''}
-          ${s.channel ? `<span>${escapeHtml(s.channel)}</span>` : ''}
-        </div>
-      </div>`;
-    }).join('');
+  const swarmHtml = `
+    <div class="swarm-map">
+      <div class="swarm-root">
+        <div class="swarm-root-label">Orchestrator</div>
+        <div class="swarm-root-name">${escapeHtml(getSessionName(session))}</div>
+      </div>
+      <div class="swarm-tree-line"></div>
+      <div class="swarm-children">
+        ${agents.map(s => {
+          const name = s.label || s.displayName || s.key.split(':').pop().slice(0, 8);
+          const statusClass = s.status === 'running' ? 'active' : '';
+          const statusLabel = s.status === 'running' ? '● live' : '✓ done';
+          const lastActivity = s.activity && s.activity.length ? s.activity[0].detail || s.activity[0].action : 'Initializing...';
+          const task = s.task || 'Autonomous Mission';
+          
+          return `
+            <div class="swarm-node ${statusClass}" onclick="openSession('${escapeHtml(s.key)}')">
+              <div class="swarm-node-header">
+                <span class="swarm-node-name">${escapeHtml(name)}</span>
+                <span class="swarm-node-status">${statusLabel}</span>
+              </div>
+              <div class="swarm-node-task" title="${escapeHtml(task)}">Mission: ${escapeHtml(task)}</div>
+              <div class="swarm-node-activity">
+                <span style="color:var(--amber);margin-right:4px">></span>${escapeHtml(lastActivity)}
+              </div>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    </div>
+  `;
+
+  container.innerHTML = swarmHtml;
 }
 
 function closePanel() {
@@ -1535,27 +1660,48 @@ function renderTranscript(entries) {
       if (c.type === 'tool') {
         const result = resultMap[c.id];
         let resultHtml;
+        const isSubagent = c.name === 'sessions_spawn' || c.name === 'sessions_send' || c.name === 'sessions_spawn_job';
+        const agentName = isSubagent && c.args ? (c.args.label || c.args.agentId || 'Sub-agent') : 'Sub-agent';
+
         if (result) {
           renderedResults.add(c.id);
-          resultHtml = `<div class="tool-content">
-            <div class="tool-args">${escapeHtml(JSON.stringify(c.args || {}, null, 2))}</div>
-            <div class="tool-result">
-              <div style="display:flex;justify-content:space-between;margin-bottom:3px">
-                <span style="color:rgba(74,222,128,.7);font-weight:600;font-size:9px;letter-spacing:.5px">RESULT</span>
-                <button class="copy-btn" onclick="copyText('${escapeHtml(result.text || '')}')">copy</button>
+          const resultText = result.text || '(empty)';
+          
+          if (isSubagent) {
+             resultHtml = `<div class="tool-content">
+              <div class="tool-args" style="background:var(--amber-glow);border-left:2px solid var(--amber)">
+                <div style="font-size:9px;color:var(--amber);margin-bottom:4px;font-weight:700">COMMAND TO ${agentName.toUpperCase()}</div>
+                ${escapeHtml(typeof c.args === 'string' ? c.args : JSON.stringify(c.args, null, 2))}
               </div>
-              ${escapeHtml(result.text || '(empty)')}
-            </div>
-          </div>`;
+              <div class="tool-result" style="border-left:2px solid var(--led-blue);background:rgba(96,165,250,.05)">
+                <div style="display:flex;justify-content:space-between;margin-bottom:3px">
+                  <span style="color:var(--led-blue);font-weight:600;font-size:9px;letter-spacing:.5px">RESPONSE FROM ${agentName.toUpperCase()}</span>
+                  <button class="copy-btn" onclick="copyText('${escapeHtml(resultText)}')">copy</button>
+                </div>
+                ${escapeHtml(resultText)}
+              </div>
+            </div>`;
+          } else {
+            resultHtml = `<div class="tool-content">
+              <div class="tool-args">${escapeHtml(JSON.stringify(c.args || {}, null, 2))}</div>
+              <div class="tool-result">
+                <div style="display:flex;justify-content:space-between;margin-bottom:3px">
+                  <span style="color:rgba(74,222,128,.7);font-weight:600;font-size:9px;letter-spacing:.5px">RESULT</span>
+                  <button class="copy-btn" onclick="copyText('${escapeHtml(resultText)}')">copy</button>
+                </div>
+                ${escapeHtml(resultText)}
+              </div>
+            </div>`;
+          }
         } else {
           resultHtml = `<div class="tool-content">
             <div class="tool-args">${escapeHtml(JSON.stringify(c.args || {}, null, 2))}</div>
-            <div class="tool-pending">waiting for result...</div>
+            <div class="tool-pending">${isSubagent ? `waiting for ${agentName} to complete mission...` : 'waiting for result...'}</div>
           </div>`;
         }
-        contentHtml += `<div class="tool-call" onclick="toggleToolCall(this)">
-          <div class="tool-header">
-            <div class="tool-name">${escapeHtml(c.name)}</div>
+        contentHtml += `<div class="tool-call ${isSubagent ? 'expanded' : ''}" onclick="toggleToolCall(this)">
+          <div class="tool-header" style="${isSubagent ? 'border-left:2px solid var(--amber)' : ''}">
+            <div class="tool-name">${isSubagent ? '🤝 INTER-AGENT COMMS' : escapeHtml(c.name)}</div>
             <div class="tool-toggle">▾</div>
           </div>
           ${resultHtml}

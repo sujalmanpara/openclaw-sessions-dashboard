@@ -10,7 +10,7 @@ const PORT = 3847;
 // Read sessions directly from the sessions store
 function getSessions() {
   try {
-    const raw = fs.readFileSync('/root/.openclaw/agents/main/sessions/sessions.json', 'utf-8');
+    const raw = fs.readFileSync('/home/sam/.openclaw/agents/main/sessions/sessions.json', 'utf-8');
     const store = JSON.parse(raw);
     // sessions.json is { sessions: { [key]: sessionData } }
     const sessions = Object.entries(store.sessions || store).map(([key, s]) => ({
@@ -26,7 +26,7 @@ function getSessions() {
 // Read cron jobs
 function getCronJobs() {
   try {
-    const raw = fs.readFileSync('/root/.openclaw/cron/jobs.json', 'utf-8');
+    const raw = fs.readFileSync('/home/sam/.openclaw/cron/jobs.json', 'utf-8');
     return JSON.stringify(JSON.parse(raw));
   } catch(e) {
     return JSON.stringify({ version: 1, jobs: [], error: e.message });
@@ -36,7 +36,7 @@ function getCronJobs() {
 // Read cron run history for a specific job
 function getCronRuns(jobId) {
   try {
-    const filePath = `/root/.openclaw/cron/runs/${jobId}.jsonl`;
+    const filePath = `/home/sam/.openclaw/cron/runs/${jobId}.jsonl`;
     if (!fs.existsSync(filePath)) {
       return JSON.stringify({ runs: [] });
     }
@@ -61,7 +61,7 @@ function getCronRuns(jobId) {
 // Toggle cron job enabled/disabled
 function toggleCronJob(jobId, enabled) {
   try {
-    const raw = fs.readFileSync('/root/.openclaw/cron/jobs.json', 'utf-8');
+    const raw = fs.readFileSync('/home/sam/.openclaw/cron/jobs.json', 'utf-8');
     const data = JSON.parse(raw);
     
     const job = data.jobs.find(j => j.id === jobId);
@@ -72,7 +72,7 @@ function toggleCronJob(jobId, enabled) {
     job.enabled = enabled;
     job.updatedAtMs = Date.now();
     
-    fs.writeFileSync('/root/.openclaw/cron/jobs.json', JSON.stringify(data, null, 2));
+    fs.writeFileSync('/home/sam/.openclaw/cron/jobs.json', JSON.stringify(data, null, 2));
     return JSON.stringify({ success: true, enabled });
   } catch(e) {
     return JSON.stringify({ error: e.message });

@@ -9,7 +9,7 @@ from watchdog.events import FileSystemEventHandler
 PORT = 3847
 WS_PORT = 3848
 DIR = os.path.dirname(os.path.abspath(__file__))
-SESSIONS_FILE = '/root/.openclaw/agents/main/sessions/sessions.json'
+SESSIONS_FILE = '/home/sam/.openclaw/agents/main/sessions/sessions.json'
 TOPIC_NAMES_FILE = os.path.join(DIR, 'topic-names.json')
 
 # ── In-memory cache ──
@@ -243,7 +243,7 @@ def load_topic_names():
             return json.load(f)
     except:
         return {}
-TRANSCRIPTS_DIR = '/root/.openclaw/agents/main/sessions/'
+TRANSCRIPTS_DIR = '/home/sam/.openclaw/agents/main/sessions/'
 PINNED_FILE = os.path.join(DIR, 'pinned.json')
 
 # WebSocket clients for real-time updates
