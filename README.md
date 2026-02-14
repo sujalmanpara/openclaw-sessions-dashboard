@@ -9,6 +9,7 @@ A real-time web dashboard for monitoring all your OpenClaw sessions — active a
 - **Live session monitoring** — auto-refreshes every 5 seconds
 - **Activity feed** — see tool calls (🔧), responses (💬), thinking (🧠) in real-time
 - **Session detail panel** — click any session to see the full transcript with color-coded entries
+- **Cron job management** — view, enable/disable, and trigger cron jobs
 - **Smart filters** — All / Active / Recent / Groups / Crons / Direct / Busy
 - **Stats bar** — total sessions, active count, cron jobs, groups at a glance
 - **Cost tracking** — per-entry cost displayed in transcripts
@@ -19,83 +20,63 @@ A real-time web dashboard for monitoring all your OpenClaw sessions — active a
 ### 1. Clone
 
 ```bash
-git clone https://github.com/sanketkheni01/openclaw-sessions-dashboard.git
+git clone https://github.com/sujalmanpara/openclaw-sessions-dashboard.git
 cd openclaw-sessions-dashboard
 ```
 
 ### 2. Configure paths
 
-Edit `serve.py` and update these paths to match your OpenClaw installation:
+Edit `server.js` and update the paths to match your OpenClaw installation:
 
-```python
-SESSIONS_FILE = '/root/.openclaw/agents/main/sessions/sessions.json'
-TRANSCRIPTS_DIR = '/root/.openclaw/agents/main/sessions/'
+```javascript
+// Sessions file
+'/home/<user>/.openclaw/agents/main/sessions/sessions.json'
+
+// Cron jobs
+'/home/<user>/.openclaw/cron/jobs.json'
+'/home/<user>/.openclaw/cron/runs/'
 ```
-
-Common locations:
-- **Linux:** `/root/.openclaw/agents/main/sessions/`
-- **macOS:** `~/.openclaw/agents/main/sessions/`
 
 ### 3. Run
 
 ```bash
-python3 serve.py
+node server.js
 ```
 
 Open `http://localhost:3847` in your browser.
 
-### 4. (Optional) Run as a systemd service
+## Files
 
-Create `/etc/systemd/system/openclaw-dashboard.service`:
-
-```ini
-[Unit]
-Description=OpenClaw Sessions Dashboard
-After=network.target
-
-[Service]
-Type=simple
-WorkingDirectory=/path/to/openclaw-sessions-dashboard
-ExecStart=/usr/bin/python3 serve.py
-Restart=always
-RestartSec=3
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Then:
-
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now openclaw-dashboard
-```
-
-## How It Works
-
-- `serve.py` — Python HTTP server that reads OpenClaw's `sessions.json` and JSONL transcript files
-- `index.html` — Single-file frontend (no build step, no dependencies)
-- Polls `/data/sessions.json` every 5 seconds for session list + recent activity
-- Fetches `/data/transcript/<session_id>` on click for full transcript view
+| File | Description |
+|---|---|
+| `server.js` | Node.js HTTP server — serves dashboard + API endpoints |
+| `index.html` | Main dashboard — sessions list, activity feed, transcripts |
+| `cron.html` | Cron job management — view, toggle, trigger, run history |
+| `session.html` | Detailed session view |
+| `system.html` | System overview |
+| `keys.html` | API keys management |
+| `send-message.mjs` | Utility to send messages to sessions |
 
 ## API Endpoints
 
-| Endpoint | Description |
-|---|---|
-| `GET /` | Dashboard UI |
-| `GET /data/sessions.json` | All sessions with recent activity for active ones |
-| `GET /data/transcript/<session_id>` | Full parsed transcript for a session |
+| Endpoint | Method | Description |
+|---|---|---|
+| `GET /` | GET | Dashboard UI |
+| `GET /data/sessions.json` | GET | All sessions with metadata |
+| `GET /data/cron-jobs.json` | GET | All cron jobs |
+| `GET /data/cron-runs/<jobId>` | GET | Run history for a cron job |
+| `POST /api/cron/toggle` | POST | Enable/disable a cron job |
+| `POST /api/cron/run` | POST | Trigger a cron job manually |
 
 ## Requirements
 
-- Python 3.6+
-- A running OpenClaw instance (reads its session files directly)
+- Node.js 18+
+- A running OpenClaw instance (reads session/cron files directly)
 
 ## Customization
 
-- **Port:** Change `PORT = 3847` in `serve.py`
-- **Activity window:** Sessions active within 2 hours get activity data (change `7200000` ms in `serve.py`)
-- **Refresh rate:** Change `setInterval(loadSessions, 5000)` in `index.html`
+- **Port:** Change `PORT = 3847` in `server.js`
+- **Refresh rate:** Change `setInterval` in `index.html`
 
 ## License
 
