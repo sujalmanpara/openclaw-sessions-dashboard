@@ -3,9 +3,11 @@ import fs from 'fs';
 import path from 'path';
 import { execSync } from 'child_process';
 import { fileURLToPath } from 'url';
+import { WebSocketServer } from 'ws';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = 3847;
+const WS_PORT = 3848;
 
 // Read sessions directly from the sessions store
 function getSessions() {
@@ -178,3 +180,35 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`🎛️  Dashboard: http://localhost:${PORT}`);
   console.log(`🌐 Tailscale: http://<tailscale-ip>:${PORT}`);
 });
+
+// === WebSocket server for live updates ===
+const wss = new WebSocketServer({ port: WS_PORT, host: '0.0.0.0' });
+const clients = new Set();
+
+wss.on('connection', (ws) => {
+  clients.add(ws);
+  ws.on('close', () => clients.delete(ws));
+  ws.on('error', () => clients.delete(ws));
+});
+
+function broadcast(data) {
+  const msg = JSON.stringify(data);
+  for (const ws of clients) {
+    try { ws.send(msg); } catch {}
+  }
+}
+
+// Watch sessions.json for changes
+const sessionsFile = '/home/sam/.openclaw/agents/main/sessions/sessions.json';
+let lastMtime = 0;
+setInterval(() => {
+  try {
+    const stat = fs.statSync(sessionsFile);
+    if (stat.mtimeMs > lastMtime) {
+      lastMtime = stat.mtimeMs;
+      broadcast({ type: 'sessions_updated' });
+    }
+  } catch {}
+}, 2000);
+
+console.log(`🔌 WebSocket: ws://localhost:${WS_PORT}`);

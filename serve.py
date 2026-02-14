@@ -358,7 +358,7 @@ def get_recent_activity(session_id, max_lines=5):
 def get_auth_info():
     """Get API key profiles from config."""
     try:
-        with open('/root/.openclaw/openclaw.json') as f:
+        with open('/home/sam/.openclaw/openclaw.json') as f:
             cfg = json.load(f)
         profiles = cfg.get('auth', {}).get('profiles', {})
         order = cfg.get('auth', {}).get('order', {})
@@ -369,7 +369,7 @@ def get_auth_info():
 def get_cron_jobs():
     """Read cron jobs from jobs.json"""
     try:
-        with open('/root/.openclaw/cron/jobs.json', 'r') as f:
+        with open('/home/sam/.openclaw/cron/jobs.json', 'r') as f:
             return json.load(f)
     except Exception as e:
         return {'version': 1, 'jobs': [], 'error': str(e)}
@@ -377,7 +377,7 @@ def get_cron_jobs():
 def get_cron_runs(job_id):
     """Read cron run history for a specific job"""
     try:
-        file_path = f'/root/.openclaw/cron/runs/{job_id}.jsonl'
+        file_path = f'/home/sam/.openclaw/cron/runs/{job_id}.jsonl'
         if not os.path.exists(file_path):
             return {'runs': []}
         
@@ -403,7 +403,7 @@ def get_cron_runs(job_id):
 def toggle_cron_job(job_id, enabled):
     """Toggle cron job enabled/disabled"""
     try:
-        with open('/root/.openclaw/cron/jobs.json', 'r') as f:
+        with open('/home/sam/.openclaw/cron/jobs.json', 'r') as f:
             data = json.load(f)
         
         job = None
@@ -418,7 +418,7 @@ def toggle_cron_job(job_id, enabled):
         job['enabled'] = enabled
         job['updatedAtMs'] = int(time.time() * 1000)
         
-        with open('/root/.openclaw/cron/jobs.json', 'w') as f:
+        with open('/home/sam/.openclaw/cron/jobs.json', 'w') as f:
             json.dump(data, f, indent=2)
         
         return {'success': True, 'enabled': enabled}
@@ -616,7 +616,7 @@ def _test_anthropic_key(cred, profile_name=''):
         # OAuth tokens (from Claude Code setup-token) can ONLY be used through OpenClaw's
         # gateway — they're restricted to Claude Code client. We check usage stats instead.
         try:
-            with open('/root/.openclaw/agents/main/agent/auth-profiles.json') as f:
+            with open('/home/sam/.openclaw/agents/main/agent/auth-profiles.json') as f:
                 store = json.load(f)
             usage = store.get('usageStats', {})
             stats = usage.get(profile_name, {})
@@ -690,7 +690,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             profile_name = body.get('profileName', '')
             enabled = body.get('enabled', True)
             try:
-                with open('/root/.openclaw/openclaw.json') as f:
+                with open('/home/sam/.openclaw/openclaw.json') as f:
                     cfg = json.load(f)
                 auth = cfg.setdefault('auth', {})
                 profiles = auth.get('profiles', {})
@@ -709,7 +709,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 else:
                     if profile_name in provider_order:
                         provider_order.remove(profile_name)
-                with open('/root/.openclaw/openclaw.json', 'w') as f:
+                with open('/home/sam/.openclaw/openclaw.json', 'w') as f:
                     json.dump(cfg, f, indent=2)
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/json')
@@ -728,10 +728,10 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             provider = body.get('provider', '')
             new_order = body.get('order', [])
             try:
-                with open('/root/.openclaw/openclaw.json') as f:
+                with open('/home/sam/.openclaw/openclaw.json') as f:
                     cfg = json.load(f)
                 cfg.setdefault('auth', {}).setdefault('order', {})[provider] = new_order
-                with open('/root/.openclaw/openclaw.json', 'w') as f:
+                with open('/home/sam/.openclaw/openclaw.json', 'w') as f:
                     json.dump(cfg, f, indent=2)
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/json')
@@ -748,7 +748,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             cl = int(self.headers.get('Content-Length', 0))
             body = json.loads(self.rfile.read(cl).decode()) if cl else {}
             try:
-                auth_store_path = '/root/.openclaw/agents/main/agent/auth-profiles.json'
+                auth_store_path = '/home/sam/.openclaw/agents/main/agent/auth-profiles.json'
                 with open(auth_store_path) as f:
                     store = json.load(f)
                 store_profiles = store.get('profiles', {})
@@ -769,7 +769,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     self.wfile.write(json.dumps({profile_name: result}).encode())
                 else:
                     results = {}
-                    with open('/root/.openclaw/openclaw.json') as f:
+                    with open('/home/sam/.openclaw/openclaw.json') as f:
                         cfg = json.load(f)
                     all_profiles = cfg.get('auth', {}).get('profiles', {})
                     for pname in all_profiles:
@@ -979,7 +979,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     return
                 # Fire-and-forget via gateway API (faster than CLI)
                 subprocess.Popen(
-                    ['node', '--import', 'tsx', '/root/.openclaw/workspace/dashboard/send-message.mjs', session_key, message],
+                    ['node', '--import', 'tsx', '/home/sam/.openclaw/workspace/dashboard/send-message.mjs', session_key, message],
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                     cwd='/root/openclaw'
                 )
@@ -1103,12 +1103,12 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         if self.path.startswith('/api/keys/usage'):
             try:
                 # Load usage stats from auth-profiles.json
-                with open('/root/.openclaw/agents/main/agent/auth-profiles.json') as f:
+                with open('/home/sam/.openclaw/agents/main/agent/auth-profiles.json') as f:
                     store = json.load(f)
                 usage_stats = store.get('usageStats', {})
 
                 # Load config for profile list
-                with open('/root/.openclaw/openclaw.json') as f:
+                with open('/home/sam/.openclaw/openclaw.json') as f:
                     cfg = json.load(f)
                 profiles = cfg.get('auth', {}).get('profiles', {})
                 order = cfg.get('auth', {}).get('order', {})
@@ -1181,7 +1181,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
         if self.path.startswith('/api/keys'):
             try:
-                with open('/root/.openclaw/openclaw.json') as f:
+                with open('/home/sam/.openclaw/openclaw.json') as f:
                     cfg = json.load(f)
                 auth = cfg.get('auth', {})
                 profiles = auth.get('profiles', {})
@@ -1463,7 +1463,7 @@ class SessionsWatcher(FileSystemEventHandler):
 def start_file_watcher():
     observer = Observer()
     handler = SessionsWatcher()
-    observer.schedule(handler, '/root/.openclaw/agents/main/sessions', recursive=True)
+    observer.schedule(handler, '/home/sam/.openclaw/agents/main/sessions', recursive=True)
     observer.start()
     return observer
 

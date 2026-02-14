@@ -1,0 +1,24 @@
+{
+  "name": "openclaw-sessions-dashboard",
+  "version": "1.0.0",
+  "description": "A real-time web dashboard for monitoring all your OpenClaw sessions — active agents, cron jobs, group chats, and direct conversations.",
+  "main": "server.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node server.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sujalmanpara/openclaw-sessions-dashboard.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/sujalmanpara/openclaw-sessions-dashboard/issues"
+  },
+  "homepage": "https://github.com/sujalmanpara/openclaw-sessions-dashboard#readme",
+  "dependencies": {
+    "ws": "^8.19.0"
+  }
+}
