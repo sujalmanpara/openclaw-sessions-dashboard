@@ -6,10 +6,30 @@ import subprocess
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
 
-PORT = 3847
-WS_PORT = 3848
+PORT = int(os.environ.get('DASHBOARD_PORT', 3847))
+WS_PORT = int(os.environ.get('DASHBOARD_WS_PORT', 3848))
 DIR = os.path.dirname(os.path.abspath(__file__))
-SESSIONS_FILE = '/home/sam/.openclaw/agents/main/sessions/sessions.json'
+
+# ── OpenClaw base dir: auto-detect from env, home dir, or common locations ──
+def _detect_openclaw_dir():
+    if os.environ.get('OPENCLAW_DIR'):
+        return os.environ['OPENCLAW_DIR']
+    home = os.path.expanduser('~')
+    candidate = os.path.join(home, '.openclaw')
+    if os.path.isdir(candidate):
+        return candidate
+    return os.path.join(home, '.openclaw')  # default fallback
+
+OPENCLAW_DIR    = _detect_openclaw_dir()
+AGENTS_DIR      = os.path.join(OPENCLAW_DIR, 'agents')
+MAIN_AGENT_DIR  = os.path.join(AGENTS_DIR, 'main')
+SESSIONS_FILE   = os.path.join(MAIN_AGENT_DIR, 'sessions', 'sessions.json')
+TRANSCRIPTS_DIR = os.path.join(MAIN_AGENT_DIR, 'sessions')
+CONFIG_FILE     = os.path.join(OPENCLAW_DIR, 'openclaw.json')
+CRON_JOBS_FILE  = os.path.join(OPENCLAW_DIR, 'cron', 'jobs.json')
+CRON_RUNS_DIR   = os.path.join(OPENCLAW_DIR, 'cron', 'runs')
+AUTH_PROFILES_FILE = os.path.join(MAIN_AGENT_DIR, 'agent', 'auth-profiles.json')
+
 TOPIC_NAMES_FILE = os.path.join(DIR, 'topic-names.json')
 
 # ── In-memory cache ──
@@ -243,7 +263,6 @@ def load_topic_names():
             return json.load(f)
     except:
         return {}
-TRANSCRIPTS_DIR = '/home/sam/.openclaw/agents/main/sessions/'
 PINNED_FILE = os.path.join(DIR, 'pinned.json')
 
 # WebSocket clients for real-time updates
@@ -268,15 +287,28 @@ def save_pinned(pinned):
     except:
         pass
 
+def get_all_transcript_dirs():
+    """Get all agent session directories."""
+    dirs = []
+    if os.path.isdir(AGENTS_DIR):
+        for agent_name in os.listdir(AGENTS_DIR):
+            sessions_dir = os.path.join(AGENTS_DIR, agent_name, 'sessions')
+            if os.path.isdir(sessions_dir):
+                dirs.append(sessions_dir)
+    if not dirs:
+        dirs = [TRANSCRIPTS_DIR]
+    return dirs
+
 def get_recent_activity(session_id, max_lines=5):
     """Read last few lines of a transcript to get current activity."""
-    patterns = [
-        os.path.join(TRANSCRIPTS_DIR, f'{session_id}.jsonl'),
-        os.path.join(TRANSCRIPTS_DIR, f'{session_id}-*.jsonl'),
-    ]
     files = []
-    for p in patterns:
-        files.extend(glob.glob(p))
+    for tdir in get_all_transcript_dirs():
+        patterns = [
+            os.path.join(tdir, f'{session_id}.jsonl'),
+            os.path.join(tdir, f'{session_id}-*.jsonl'),
+        ]
+        for p in patterns:
+            files.extend(glob.glob(p))
     if not files:
         return None
     
@@ -358,7 +390,7 @@ def get_recent_activity(session_id, max_lines=5):
 def get_auth_info():
     """Get API key profiles from config."""
     try:
-        with open('/home/sam/.openclaw/openclaw.json') as f:
+        with open(CONFIG_FILE) as f:
             cfg = json.load(f)
         profiles = cfg.get('auth', {}).get('profiles', {})
         order = cfg.get('auth', {}).get('order', {})
@@ -369,7 +401,7 @@ def get_auth_info():
 def get_cron_jobs():
     """Read cron jobs from jobs.json"""
     try:
-        with open('/home/sam/.openclaw/cron/jobs.json', 'r') as f:
+        with open(CRON_JOBS_FILE, 'r') as f:
             return json.load(f)
     except Exception as e:
         return {'version': 1, 'jobs': [], 'error': str(e)}
@@ -377,7 +409,7 @@ def get_cron_jobs():
 def get_cron_runs(job_id):
     """Read cron run history for a specific job"""
     try:
-        file_path = f'/home/sam/.openclaw/cron/runs/{job_id}.jsonl'
+        file_path = os.path.join(CRON_RUNS_DIR, f'{job_id}.jsonl')
         if not os.path.exists(file_path):
             return {'runs': []}
         
@@ -403,7 +435,7 @@ def get_cron_runs(job_id):
 def toggle_cron_job(job_id, enabled):
     """Toggle cron job enabled/disabled"""
     try:
-        with open('/home/sam/.openclaw/cron/jobs.json', 'r') as f:
+        with open(CRON_JOBS_FILE, 'r') as f:
             data = json.load(f)
         
         job = None
@@ -418,7 +450,7 @@ def toggle_cron_job(job_id, enabled):
         job['enabled'] = enabled
         job['updatedAtMs'] = int(time.time() * 1000)
         
-        with open('/home/sam/.openclaw/cron/jobs.json', 'w') as f:
+        with open(CRON_JOBS_FILE, 'w') as f:
             json.dump(data, f, indent=2)
         
         return {'success': True, 'enabled': enabled}
@@ -501,10 +533,31 @@ def calculate_session_stats(sessions):
     
     return stats
 
+def get_all_sessions_raw():
+    """Read and merge sessions.json from all agent directories."""
+    merged = {}
+    try:
+        if os.path.isdir(AGENTS_DIR):
+            for agent_name in os.listdir(AGENTS_DIR):
+                sessions_file = os.path.join(AGENTS_DIR, agent_name, 'sessions', 'sessions.json')
+                if os.path.isfile(sessions_file):
+                    try:
+                        with open(sessions_file) as f:
+                            data = json.load(f)
+                            merged.update(data)
+                    except Exception:
+                        pass
+    except Exception:
+        pass
+    if not merged:
+        # fallback to main
+        with open(SESSIONS_FILE) as f:
+            merged = json.load(f)
+    return merged
+
 def get_sessions_with_activity():
     try:
-        with open(SESSIONS_FILE) as f:
-            raw = json.load(f)
+        raw = get_all_sessions_raw()
         
         sessions = []
         now = time.time() * 1000
@@ -616,7 +669,7 @@ def _test_anthropic_key(cred, profile_name=''):
         # OAuth tokens (from Claude Code setup-token) can ONLY be used through OpenClaw's
         # gateway — they're restricted to Claude Code client. We check usage stats instead.
         try:
-            with open('/home/sam/.openclaw/agents/main/agent/auth-profiles.json') as f:
+            with open(AUTH_PROFILES_FILE) as f:
                 store = json.load(f)
             usage = store.get('usageStats', {})
             stats = usage.get(profile_name, {})
@@ -690,7 +743,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             profile_name = body.get('profileName', '')
             enabled = body.get('enabled', True)
             try:
-                with open('/home/sam/.openclaw/openclaw.json') as f:
+                with open(CONFIG_FILE) as f:
                     cfg = json.load(f)
                 auth = cfg.setdefault('auth', {})
                 profiles = auth.get('profiles', {})
@@ -709,7 +762,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 else:
                     if profile_name in provider_order:
                         provider_order.remove(profile_name)
-                with open('/home/sam/.openclaw/openclaw.json', 'w') as f:
+                with open(CONFIG_FILE, 'w') as f:
                     json.dump(cfg, f, indent=2)
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/json')
@@ -728,10 +781,10 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             provider = body.get('provider', '')
             new_order = body.get('order', [])
             try:
-                with open('/home/sam/.openclaw/openclaw.json') as f:
+                with open(CONFIG_FILE) as f:
                     cfg = json.load(f)
                 cfg.setdefault('auth', {}).setdefault('order', {})[provider] = new_order
-                with open('/home/sam/.openclaw/openclaw.json', 'w') as f:
+                with open(CONFIG_FILE, 'w') as f:
                     json.dump(cfg, f, indent=2)
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/json')
@@ -748,7 +801,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             cl = int(self.headers.get('Content-Length', 0))
             body = json.loads(self.rfile.read(cl).decode()) if cl else {}
             try:
-                auth_store_path = '/home/sam/.openclaw/agents/main/agent/auth-profiles.json'
+                auth_store_path = AUTH_PROFILES_FILE
                 with open(auth_store_path) as f:
                     store = json.load(f)
                 store_profiles = store.get('profiles', {})
@@ -769,7 +822,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     self.wfile.write(json.dumps({profile_name: result}).encode())
                 else:
                     results = {}
-                    with open('/home/sam/.openclaw/openclaw.json') as f:
+                    with open(CONFIG_FILE) as f:
                         cfg = json.load(f)
                     all_profiles = cfg.get('auth', {}).get('profiles', {})
                     for pname in all_profiles:
@@ -978,10 +1031,11 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                     self.wfile.write(b'{"error":"Session key not found"}')
                     return
                 # Fire-and-forget via gateway API (faster than CLI)
+                send_msg_script = os.path.join(DIR, 'send-message.mjs')
                 subprocess.Popen(
-                    ['node', '--import', 'tsx', '/home/sam/.openclaw/workspace/dashboard/send-message.mjs', session_key, message],
+                    ['node', '--import', 'tsx', send_msg_script, session_key, message],
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                    cwd='/root/openclaw'
+                    cwd=DIR
                 )
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/json')
@@ -1103,12 +1157,12 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         if self.path.startswith('/api/keys/usage'):
             try:
                 # Load usage stats from auth-profiles.json
-                with open('/home/sam/.openclaw/agents/main/agent/auth-profiles.json') as f:
+                with open(AUTH_PROFILES_FILE) as f:
                     store = json.load(f)
                 usage_stats = store.get('usageStats', {})
 
                 # Load config for profile list
-                with open('/home/sam/.openclaw/openclaw.json') as f:
+                with open(CONFIG_FILE) as f:
                     cfg = json.load(f)
                 profiles = cfg.get('auth', {}).get('profiles', {})
                 order = cfg.get('auth', {}).get('order', {})
@@ -1181,7 +1235,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
         if self.path.startswith('/api/keys'):
             try:
-                with open('/home/sam/.openclaw/openclaw.json') as f:
+                with open(CONFIG_FILE) as f:
                     cfg = json.load(f)
                 auth = cfg.get('auth', {})
                 profiles = auth.get('profiles', {})
@@ -1237,13 +1291,10 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             t_limit = int(tparams.get('limit', [100])[0])
             t_offset = int(tparams.get('offset', [-1])[0])  # -1 means "last N"
             import glob
-            patterns = [
-                os.path.join(TRANSCRIPTS_DIR, f'{sid}.jsonl'),
-                os.path.join(TRANSCRIPTS_DIR, f'{sid}-*.jsonl'),
-            ]
             files = []
-            for p in patterns:
-                files.extend(glob.glob(p))
+            for tdir in get_all_transcript_dirs():
+                for p in [os.path.join(tdir, f'{sid}.jsonl'), os.path.join(tdir, f'{sid}-*.jsonl')]:
+                    files.extend(glob.glob(p))
             
             if not files:
                 self.send_response(404)
@@ -1463,7 +1514,14 @@ class SessionsWatcher(FileSystemEventHandler):
 def start_file_watcher():
     observer = Observer()
     handler = SessionsWatcher()
-    observer.schedule(handler, '/home/sam/.openclaw/agents/main/sessions', recursive=True)
+    # Watch all agent session directories
+    if os.path.isdir(AGENTS_DIR):
+        for agent_name in os.listdir(AGENTS_DIR):
+            sessions_dir = os.path.join(AGENTS_DIR, agent_name, 'sessions')
+            if os.path.isdir(sessions_dir):
+                observer.schedule(handler, sessions_dir, recursive=True)
+    else:
+        observer.schedule(handler, os.path.join(MAIN_AGENT_DIR, 'sessions'), recursive=True)
     observer.start()
     return observer
 
